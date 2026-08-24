@@ -19,7 +19,9 @@ no guide.
 You do **not** need a local Python installation — `uv` reads `.python-version` and provisions
 Python 3.12 itself.
 
-Docker and Docker Compose become prerequisites from **M2**. They are not needed yet.
+Docker and Docker Compose **are** prerequisites now: the container stack landed with M2. `make up`
+starts the development stack and `make up-prod` the production-like one; `make down` stops both.
+Everything except `make install` and `make check` runs inside containers.
 
 ## Local setup
 
@@ -32,10 +34,10 @@ make check          # lint, type-check, run tests
 
 That is the whole setup. `make help` lists every available task.
 
-> **What you cannot do yet.** There is no running application: the Docker stack arrives in **M2**
-> and the Django project in **M3**. Targets tagged `[M2]` or `[M3]` in `make help` are defined but
-> will tell you which file is missing and which issue delivers it. That is expected, not a broken
-> setup.
+> **What you cannot do yet.** The Docker stack runs, but there is no application in it: the Django
+> project arrives in **M3**, so both services start and then hold themselves open with a message
+> naming the issue that replaces them. Targets tagged `[M3]` in `make help` are defined but will
+> tell you which file is missing and which issue delivers it. That is expected, not a broken setup.
 
 ## Picking something to work on
 

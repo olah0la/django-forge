@@ -1,0 +1,161 @@
+# ---------------------------------------------------------------------------
+# django-forge — local stack
+# ---------------------------------------------------------------------------
+# Compose describes the whole stack in one file so that a single command starts
+# everything, wired correctly, identically on every machine. The alternative is
+# a `docker run` incantation that lives in one person's shell history.
+#
+# PROFILES. This file describes two stacks, not one:
+#
+#     docker compose up                          the development stack
+#     docker compose --profile prod up app-prod  the production-like stack
+#
+# The `app` service carries no `profiles:` key, so it is always enabled and a
+# bare `up` starts it — development is the common case and should need no flag.
+# `app-prod` is opt-in. Name it explicitly, as above: `--profile prod up` on its
+# own would ALSO start the always-enabled `app`, and the two would fight over a
+# port. `make up` and `make up-prod` wrap both forms correctly.
+#
+# The point of keeping both in one file is that a production-only problem can be
+# reproduced locally, against the same image, without inventing a second file
+# that drifts out of step with this one.
+#
+# There is no `version:` key. It has been obsolete since Compose v2 and now only
+# produces a warning.
+
+# ---------------------------------------------------------------------------
+# Shared service definition
+# ---------------------------------------------------------------------------
+# An `x-` key is ignored by Compose; the anchor (&app-base) lets both services
+# merge it in with `<<: *app-base`. Defining the common half once is what stops
+# the two profiles from quietly drifting apart — the failure mode being a
+# production-like profile that no longer resembles production.
+x-app-base: &app-base
+  build:
+    context: .
+    # The named runtime stage in the Dockerfile. Without `target`, Compose would
+    # build the last stage, which happens to be the same one today — being
+    # explicit keeps that true when stages are added.
+    target: runtime
+
+  # Configuration comes from the environment, never from this file: it is
+  # committed, so a secret written here is a published secret.
+  #
+  # `required: false` is what lets a clean checkout run `docker compose up` with
+  # no preparation at all. `.env` is git-ignored and personal; `.env.example`
+  # arrives with M3-03 and becomes the documented contract. Listing the file
+  # rather than each variable means M3-03's variables reach the container
+  # without this file needing another edit.
+  env_file:
+    - path: .env
+      required: false
+
+  # Prevents a process inside the container from gaining privileges through
+  # setuid binaries. The companion to the non-root user from M2-03.
+  security_opt:
+    - no-new-privileges:true
+
+  restart: unless-stopped
+
+services:
+  # -------------------------------------------------------------------------
+  # app — the development stack (no `profiles:`, so this is what `up` starts)
+  # -------------------------------------------------------------------------
+  app:
+    <<: *app-base
+
+    build:
+      context: .
+      target: runtime
+      args:
+        # On Linux a bind mount keeps the host's numeric owner, so a container
+        # user with a different UID cannot write the files it just mounted. The
+        # Dockerfile takes these as build arguments for exactly this reason.
+        # If `id -u` is not 1000 on your machine, export APP_UID/APP_GID (or put
+        # them in .env) before building, or the M2-07 source mount will be
+        # read-only from inside the container.
+        APP_UID: ${APP_UID:-1000}
+        APP_GID: ${APP_GID:-1000}
+
+    environment:
+      # Deliberately minimal. Django's real variable set is defined by M3-02
+      # (layered settings) and documented by M3-03; guessing names here now
+      # would only create a second, wrong source of truth. Everything else
+      # arrives through env_file above.
+      DJANGO_DEBUG: "${DJANGO_DEBUG:-1}"
+
+    ports:
+      # host:container. Override the host side with APP_PORT when 8000 is taken.
+      - "${APP_PORT:-8000}:8000"
+
+    # TODO(M2-07): mount the source tree here so edits reload without a rebuild.
+    #   volumes:
+    #     - ./src:/app/src
+    # Mount deliberately — a bind mount over all of /app would shadow
+    # /app/.venv, which exists in the image and not on the host, and the
+    # container would fail with a confusing "module not found".
+
+    # TODO(M4-01): depends_on the `db` service, with `condition:
+    # service_healthy` from M2-06 rather than a bare dependency. `depends_on`
+    # alone waits for the container to START, not for Postgres to accept
+    # connections, which is a race that only shows up on slow machines.
+
+    # TODO(M2-06): healthcheck.
+
+    # --- placeholder command, removed by M3-01 -------------------------------
+    # The image's own CMD exits 1, because there is no application in it yet
+    # (see the Dockerfile). A container that exits immediately cannot be
+    # `exec`-ed into, which would make the stack impossible to inspect. This
+    # keeps it alive and says why. M3-01 replaces it with the Django
+    # development server, and M2-07 makes that server auto-reload.
+    command:
+      - sh
+      - -c
+      - |
+        echo '  app (development): no Django project in this image yet — M3-01 delivers it.'
+        echo '  The container is held open so you can inspect it: docker compose exec app bash'
+        exec sleep infinity
+
+  # -------------------------------------------------------------------------
+  # app-prod — the production-like stack (opt-in)
+  # -------------------------------------------------------------------------
+  # Same image, run the way a deployment would run it: no source mount, no
+  # debug, no build arguments tailored to one developer's machine.
+  app-prod:
+    <<: *app-base
+
+    profiles:
+      - prod
+
+    environment:
+      DJANGO_DEBUG: "0"
+
+    ports:
+      # A different host port on purpose, so starting this stack while the
+      # development one is up fails on neither port nor patience.
+      - "${APP_PROD_PORT:-8001}:8000"
+
+    # Give the application time to finish in-flight requests before it is
+    # killed. M6-05 makes the server itself honour SIGTERM; this is the other
+    # half of that, and 30s matches the default gunicorn graceful timeout.
+    stop_grace_period: 30s
+
+    # --- placeholder command, removed by M6-02 -------------------------------
+    # M6-02 replaces this with the real gunicorn invocation.
+    command:
+      - sh
+      - -c
+      - |
+        echo '  app-prod: no production server configured yet — M6-02 delivers it.'
+        exec sleep infinity
+
+# ---------------------------------------------------------------------------
+# Volumes
+# ---------------------------------------------------------------------------
+# Intentionally absent. Named volumes are for state that must outlive a
+# container, and nothing in this stack holds state yet: the application is
+# stateless and there is no database until M4-01, which adds the `db` service
+# and a named volume for its data directory.
+#
+# When it does, note that `docker compose down` keeps volumes and
+# `docker compose down -v` destroys them. The second is unrecoverable.

@@ -92,17 +92,28 @@ check: lint typecheck test ## Run lint, typecheck and test (local pre-push gate)
 
 ##@ Docker — available from M2
 
-build: ## [M2] Build the application image
-	@$(call require,$(COMPOSE_FILE),M2-04 (docker-compose.yml))
-	$(COMPOSE) build
+# ALL_PROFILES enables every Compose profile at once. Targets that should act
+# on the whole project regardless of which stack is up — building and tearing
+# down — need it: without a profile flag, `docker compose down` walks past a
+# running production-like container and then fails to remove the network,
+# leaving the stack half up with no error that says so.
+ALL_PROFILES := --profile '*'
 
-up: ## [M2] Start the full stack
+build: ## [M2] Build the application image (both profiles)
+	@$(call require,$(COMPOSE_FILE),M2-04 (docker-compose.yml))
+	$(COMPOSE) $(ALL_PROFILES) build
+
+up: ## [M2] Start the development stack
 	@$(call require,$(COMPOSE_FILE),M2-04 (docker-compose.yml))
 	$(COMPOSE) up -d
 
-down: ## [M2] Stop the stack, keeping volumes and data
+up-prod: ## [M2] Start the production-like stack
 	@$(call require,$(COMPOSE_FILE),M2-04 (docker-compose.yml))
-	$(COMPOSE) down
+	$(COMPOSE) --profile prod up -d app-prod
+
+down: ## [M2] Stop every stack, keeping volumes and data
+	@$(call require,$(COMPOSE_FILE),M2-04 (docker-compose.yml))
+	$(COMPOSE) $(ALL_PROFILES) down
 
 logs: ## [M2] Follow logs from all services
 	@$(call require,$(COMPOSE_FILE),M2-04 (docker-compose.yml))

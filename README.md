@@ -132,9 +132,34 @@ make install     # create .venv and install runtime + dev dependencies
 make check       # lint, type-check and test
 ```
 
-Every routine task has a `make` target (M1-03). Targets tagged `[M2]` or `[M3]` are listed but not
-usable yet — running one tells you which file is missing and which issue delivers it, rather than
-failing with a raw Docker error. The underlying commands are plain `uv`:
+The container stack runs too (M2-01 through M2-04). It describes two stacks in one
+`docker-compose.yml`, selected by Compose *profiles*:
+
+```bash
+make build       # build the image
+make up          # start the development stack   (host port 8000)
+make up-prod     # start the production-like one (host port 8001)
+make ps          # what is running
+make shell       # a shell inside the app container — `whoami` returns `app`, not root
+make down        # stop everything, both profiles
+```
+
+Development is the default profile, so a bare `docker compose up` starts it with no flag. The
+production-like profile is opt-in and must name its service:
+`docker compose --profile prod up app-prod`. Both run the same image; the second runs it the way a
+deployment would, which is what makes a production-only problem reproducible locally.
+
+> **Linux users whose `id -u` is not 1000:** export `APP_UID=$(id -u)` and `APP_GID=$(id -g)`
+> before building. A bind mount keeps the host's numeric owner, so a container user with a
+> different UID cannot write the files it mounted — this bites on Linux and not on macOS.
+
+There is no application inside the container yet, so both services hold themselves open with a
+message pointing at the issue that replaces them (M3-01 for the Django development server, M6-02
+for gunicorn). The stack is real; the thing it will serve is not there yet.
+
+Targets tagged `[M3]` are listed but not usable — running one tells you which file is missing and
+which issue delivers it, rather than failing with a raw error. The underlying commands are plain
+`uv`:
 
 ```bash
 uv sync                      # what `make install` runs
@@ -146,7 +171,7 @@ uv lock                      # re-resolve after editing dependencies in pyprojec
 local Python installation is needed. **`uv.lock` is committed and must never be edited by hand** —
 it is what makes every install resolve to identical versions.
 
-There is nothing to run yet beyond installing: the Django project arrives in M3.
+The Django project itself arrives in M3 — until then the container starts, but serves nothing.
 
 ---
 
