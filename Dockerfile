@@ -104,10 +104,23 @@ RUN groupadd --gid ${APP_GID} app \
  && useradd --uid ${APP_UID} --gid ${APP_GID} --create-home --shell /bin/bash app \
  && chown app:app /app
 
+# The entrypoint runs before the application on every start: it validates
+# configuration and waits for the database, then `exec`s whatever command it
+# was given. Copied and made executable while still root, because the app user
+# must not be able to rewrite the script that runs as its own startup.
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod 0555 /usr/local/bin/docker-entrypoint.sh
+
 # Set USER as late as possible: every step above needs to write as root, and
 # the ones that follow do not. From here on the container has no privileges it
 # does not need.
 USER app
+
+# ENTRYPOINT is set in the image rather than in Compose, so every launch path
+# — docker run, both Compose profiles, any future deployment — goes through the
+# same startup sequence. Whatever is passed as CMD (or as a Compose `command:`)
+# arrives as this script's "$@" and is exec'd.
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
 # There is no application to run yet. Fail with a message that says what is
 # missing and which issue delivers it, rather than an opaque traceback.
