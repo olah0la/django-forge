@@ -12,6 +12,12 @@
 # manifests are copied and installed BEFORE application source, so editing a
 # Python file reuses the cached dependency layer instead of reinstalling
 # everything. Reversing those two steps is the most common Dockerfile mistake.
+#
+# The third idea is privilege. A container runs as root unless told otherwise,
+# so a single code-execution bug hands an attacker root inside the container and
+# a much better shot at escaping it. The runtime stage below creates a dedicated
+# unprivileged user, and deliberately does NOT give it write access to its own
+# installed code. See the `USER` block near the bottom.
 
 # ===========================================================================
 # Stage 1 — builder: resolve and install dependencies
@@ -70,16 +76,38 @@ ENV \
     PYTHONDONTWRITEBYTECODE=1 \
     # Put the venv first on PATH so `python` is the venv's interpreter with no
     # activation step.
-    PATH="/app/.venv/bin:$PATH"
+    PATH="/app/.venv/bin:$PATH" \
+    # `USER` does NOT set HOME — without this line it stays /root, which the
+    # app user cannot write, and anything caching under $HOME fails with a
+    # confusing permission error rather than an obvious one.
+    HOME=/home/app
 
 WORKDIR /app
 
 # The only thing carried over from the builder.
 COPY --from=builder /app/.venv /app/.venv
 
-# TODO(M2-03): this stage still runs as root. Add a dedicated non-root user
-# and a USER instruction. Running as root means an attacker who achieves code
-# execution inside the container gets far more capability than they should.
+# --- the unprivileged user ------------------------------------------------
+# UID/GID are build arguments so a Compose dev profile can match the host user
+# (M2-04). On Linux a bind mount keeps the host's numeric owner, so a container
+# user with a different UID cannot write the files it just mounted. Defaults are
+# the conventional 1000. ARG is per-stage: these have to be declared here, not
+# once at the top of the file.
+ARG APP_UID=1000
+ARG APP_GID=1000
+
+# `chown app:app /app` is NOT recursive, and that is the point: the working
+# directory becomes writable, while /app/.venv stays root-owned and merely
+# readable. A process that gets code execution therefore cannot rewrite its own
+# dependencies or pip-install into the venv.
+RUN groupadd --gid ${APP_GID} app \
+ && useradd --uid ${APP_UID} --gid ${APP_GID} --create-home --shell /bin/bash app \
+ && chown app:app /app
+
+# Set USER as late as possible: every step above needs to write as root, and
+# the ones that follow do not. From here on the container has no privileges it
+# does not need.
+USER app
 
 # There is no application to run yet. Fail with a message that says what is
 # missing and which issue delivers it, rather than an opaque traceback.
