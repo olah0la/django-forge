@@ -116,6 +116,33 @@ RUN chmod 0555 /usr/local/bin/docker-entrypoint.sh
 # does not need.
 USER app
 
+# ---------------------------------------------------------------------------
+# Health check
+# ---------------------------------------------------------------------------
+# Tells Docker whether the process inside is actually WORKING, not merely
+# running. That distinction is what lets one service wait for another to be
+# `healthy` rather than merely `started` — see the db block in
+# docker-compose.yml, which M4-01 activates.
+#
+# What it proves TODAY: the interpreter and the installed virtualenv are
+# intact. There is no HTTP server yet; M6-01 replaces this with a request to
+# the readiness endpoint. Note the slim image has no curl or wget, so that
+# probe will be Python too — this is the shape it keeps.
+#
+# The values are chosen, not copied:
+#   --interval=30s      this catches a container that has gone bad; it is not
+#                       sub-second failover. Polling harder is constant load
+#                       for no benefit, and it runs for the container's life.
+#   --timeout=5s        ~60x the measured probe cost (85ms), so a loaded
+#                       machine does not produce false failures.
+#   --start-period=10s  failures in this window do NOT count toward retries.
+#                       Too short and a slow first boot is reported as failure
+#                       and the container is restarted in a loop.
+#   --retries=3         three consecutive failures before `unhealthy`, so one
+#                       transient blip does not flap the service.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD ["python", "-c", "import django"]
+
 # ENTRYPOINT is set in the image rather than in Compose, so every launch path
 # — docker run, both Compose profiles, any future deployment — goes through the
 # same startup sequence. Whatever is passed as CMD (or as a Compose `command:`)

@@ -139,10 +139,17 @@ The container stack runs too (M2-01 through M2-04). It describes two stacks in o
 make build       # build the image
 make up          # start the development stack   (host port 8000)
 make up-prod     # start the production-like one (host port 8001)
-make ps          # what is running
+make ps          # what is running, and whether it is healthy
 make shell       # a shell inside the app container — `whoami` returns `app`, not root
 make down        # stop everything, both profiles
 ```
+
+Both containers report a **health status**, so `make ps` shows `Up 20 seconds (healthy)` rather
+than just `Up`. Today the check proves the container's runtime is intact — the interpreter and the
+installed virtualenv work. It does *not* yet prove the application can serve traffic, because there
+is no application: **M6-01** replaces the probe with a request to the readiness endpoint. The value
+of having it now is that **M4-01** can gate PostgreSQL startup on `condition: service_healthy`
+instead of a bare dependency.
 
 Development is the default profile, so a bare `docker compose up` starts it with no flag. The
 production-like profile is opt-in and must name its service:
@@ -204,7 +211,7 @@ sound.
 | **12-factor configuration** | The principle that anything differing between environments — credentials, hostnames, log levels — comes from *environment variables*, not from code. It is what lets the exact same built image be promoted from staging to production. |
 | **ASGI / WSGI** | The interfaces between a web server and a Python application. WSGI handles one request per worker at a time; ASGI additionally supports asynchronous views and long-lived connections. |
 | **Migration** | A versioned, ordered description of a database schema change. Django generates them from your model changes. They are also the most common cause of serious production incidents — an operation that is instant on 50 local rows can lock a 50-million-row table. |
-| **Liveness vs. readiness** | Two different questions an orchestrator asks. *Liveness*: "is this process healthy, or should I restart it?" *Readiness*: "should I send it traffic right now?" A container still opening its database connections is alive but not ready — conflating the two causes outages. |
+| **Liveness vs. readiness** | Two different questions an orchestrator asks. *Liveness*: "is this process healthy, or should I restart it?" *Readiness*: "should I send it traffic right now?" A container still opening its database connections is alive but not ready — conflating the two causes outages. The `HEALTHCHECK` in the Dockerfile is the *container-level* answer; **M6-01** adds the *application-level* one as HTTP endpoints. |
 | **Error envelope** | A single documented JSON shape used for every error the API returns. Without one, clients must handle a different shape per error type, and will get at least one of them wrong. |
 | **Correlation ID** | A unique value attached to every log line produced while handling one request, so those lines can be reassembled from logs interleaved across many concurrent requests. |
 | **Graceful shutdown** | Finishing in-flight requests when the platform sends `SIGTERM`, instead of dropping them. Containers are stopped on every deploy, so an app that ignores `SIGTERM` drops requests on every release. |

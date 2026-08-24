@@ -100,7 +100,38 @@ services:
     # alone waits for the container to START, not for Postgres to accept
     # connections, which is a race that only shows up on slow machines.
 
-    # TODO(M2-06): healthcheck.
+    # --- health check -------------------------------------------------------
+    # Inherited from the image (see HEALTHCHECK in the Dockerfile), so every
+    # launch path reports health identically and `docker compose ps` shows a
+    # STATUS of "(healthy)". Override here only if dev and prod ever need
+    # genuinely different probes.
+    #
+    # TODO(M4-01): once the `db` service exists, gate this service on it being
+    # READY rather than merely started. Uncomment both blocks together:
+    #
+    #     depends_on:
+    #       db:
+    #         condition: service_healthy
+    #
+    # and add the db service with its own check:
+    #
+    #     db:
+    #       image: postgres:16-alpine
+    #       healthcheck:
+    #         # pg_isready ships with the postgres image. `-U` matters: without
+    #         # it the check uses the wrong default user and can report failure
+    #         # on a perfectly healthy database.
+    #         test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+    #         interval: 10s
+    #         timeout: 5s
+    #         start_period: 30s   # initdb runs on first boot and is slow
+    #         retries: 5
+    #
+    # Why `condition: service_healthy` and not a bare `depends_on`: a bare
+    # dependency waits only for the container to START. Postgres accepts TCP
+    # connections well before it will answer a query, so the app would connect
+    # too early and fail on its first statement — a race that shows up on slow
+    # machines and in CI, and not on the developer's laptop.
 
     # --- placeholder command, removed by M3-01 -------------------------------
     # The image's own CMD exits 1, because there is no application in it yet
