@@ -187,7 +187,7 @@ sound.
 
 ## 📄 License
 
-Not yet chosen — tracked as issue **M1-05**.
+Released under the **MIT License** — see [LICENSE](LICENSE).
 
-⚠️ Until a `LICENSE` file exists, this code carries **no license**, which means it is not yet
-formally available for reuse. Resolving this is part of M1.
+You may use, modify, and redistribute this template, including commercially, provided the copyright
+notice is kept. Projects forged from it carry no obligation to be open source.
