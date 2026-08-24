@@ -150,51 +150,17 @@ There is nothing to run yet beyond installing: the Django project arrives in M3.
 
 ## 🤝 Your first contribution
 
-New to the project? This is the path.
+New to the project? Start with a
+[`good first issue`](https://github.com/olah0la/django-forge/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
+— these are self-contained and chosen so you can finish one without holding the whole system in
+your head.
 
-### 1. Pick an issue
-
-Start with a
-[`good first issue`](https://github.com/olah0la/django-forge/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
-These are self-contained, have few dependencies, and are chosen so you can finish one without
-needing the whole system in your head.
-
-Every issue has a **Context** section explaining *why* the work exists, not just what to do. If that
-section does not make the purpose clear to you, **that is a defect in the issue** — say so in a
-comment and it will be rewritten. Issues that cannot be understood without tribal knowledge are the
-reason onboarding is slow, and they are worth fixing.
-
-### 2. Check the dependencies
-
-Issues carry a **Depends on** field. If the issues it depends on are still open, pick something
-else — the roadmap is ordered deliberately, and starting downstream work early usually means
-redoing it.
-
-### 3. Read the acceptance criteria before you start
-
-They are written to be objectively checkable, and they define done. If you finish and a box cannot
-honestly be ticked, the work is not complete.
-
-### 4. Open a pull request
-
-Reference the issue it closes. Reviewers will check the acceptance criteria and this shared
-**Definition of Done**, which every task inherits:
-
-- [ ] All acceptance criteria are met and were **demonstrated, not assumed**
-- [ ] The change is documented where a future reader will look for it
-- [ ] `.env.example` and `README.md` are updated if behaviour or setup changed
-- [ ] The full stack starts cleanly from a fresh clone after the change
-- [ ] The change has been reviewed and approved by at least one other engineer
-
-### 5. Opening a new issue
-
-Use the templates — 🧩 **Task** for implementation work, 🐛 **Bug report** for defects, and
-🎯 **Epic** for a milestone-sized body of work. The required fields exist so that the next person to
-read your issue has what they need.
+**[CONTRIBUTING.md](CONTRIBUTING.md) is the full guide**: setup, branching, commit conventions, what
+reviewers check, and the Definition of Done. It is short by design.
 
 > 💡 **Asking questions is not a failure mode.** A question asked early costs minutes; a wrong
 > assumption discovered in review costs a day. If something in an issue or in this README is
-> unclear, that is worth raising.
+> unclear, that is worth raising — an issue you cannot understand is a defect in the issue.
 
 ---
 
