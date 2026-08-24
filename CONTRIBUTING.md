@@ -57,7 +57,7 @@ That is the whole setup. `make help` lists every available task.
 
 ```
 m1-foundations
-m2-containerization
+m2/containerization
 ```
 
 **Give an issue its own branch if any of these is true:**
@@ -68,7 +68,7 @@ m2-containerization
 - It might need to be reverted independently of the rest of the milestone
 
 ```
-m4-03-migration-review-checklist
+m4/03-migration-review-checklist
 ```
 
 If none of those apply, commit to the milestone branch. You do not need to make a judgement call
