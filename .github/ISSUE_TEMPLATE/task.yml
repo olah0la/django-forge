@@ -1,0 +1,132 @@
+name: Task
+description: A unit of implementation work belonging to a milestone.
+title: "[Mx-nn] "
+labels:
+  - "type:task"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for implementation work. The fields below mirror the structure used in
+        `issues.md` in the repository root, so a backlog entry can be copied across directly.
+
+        A good issue can be picked up by someone who was not part of the conversation that created
+        it. If you cannot explain *why* the work matters in the Context field, the issue is not
+        ready to be opened.
+
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      description: One sentence describing the outcome. Describe the result, not the activity.
+      placeholder: Run the application container as a dedicated non-root user.
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: >
+        Why does this work exist? Explain the problem and the background a colleague newer to the
+        project would need. Assume no prior knowledge of the discussion that led here, and expand
+        any term that is not universally known.
+      placeholder: |
+        By default a container process runs as root. If an attacker achieves code execution through
+        an application vulnerability, running as root gives them substantially more capability
+        inside the container and improves their odds of escaping it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance criteria
+      description: >
+        Objectively checkable statements. When every box is ticked, the issue is complete. Avoid
+        subjective wording such as "works well" or "is clean" — a reviewer must be able to verify
+        each line without interpretation.
+      value: |
+        - [ ] 
+        - [ ] 
+        - [ ] 
+    validations:
+      required: true
+
+  - type: textarea
+    id: implementation-notes
+    attributes:
+      label: Implementation notes
+      description: >
+        Optional. Pointers rather than prescriptions — relevant files, a suggested approach, known
+        pitfalls, prior art. Leave the design decisions to whoever picks the issue up.
+      placeholder: >
+        Set the USER instruction as late as possible so earlier build steps that need elevated
+        permissions still work. Test on Linux specifically; macOS masks bind-mount ownership
+        problems.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of the system does this work touch?
+      options:
+        - "tooling — repository setup, dependencies, developer commands"
+        - "docker — Dockerfile, Compose, images, container runtime"
+        - "django — project structure, settings, configuration"
+        - "database — PostgreSQL, models, migrations"
+        - "api — Django Ninja routers, schemas, error handling"
+        - "ops — health checks, logging, application server, shutdown"
+        - "docs — documentation, ADRs, contributor guidance"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: estimate
+    attributes:
+      label: Estimate
+      description: >
+        Relative effort, not hours. An XL is a signal that the issue needs splitting before it is
+        scheduled.
+      options:
+        - "XS — a single file, a well-understood change"
+        - "S — a few files, no design decisions required"
+        - "M — requires a design decision, or touches several parts of the system"
+        - "L — substantial; consider whether it should be split"
+        - "XL — too large as written; split before starting"
+    validations:
+      required: true
+
+  - type: input
+    id: milestone
+    attributes:
+      label: Milestone
+      description: The milestone this belongs to, as named in `milestones.md`.
+      placeholder: M2 — Containerization
+    validations:
+      required: false
+
+  - type: input
+    id: dependencies
+    attributes:
+      label: Depends on
+      description: >
+        Issues that must be complete first. Use backlog identifiers before issue numbers exist, and
+        replace them with issue links afterwards.
+      placeholder: "#14, #17 (M2-01, M2-03)"
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: definition-of-done
+    attributes:
+      label: Definition of Done
+      description: Inherited by every task. Confirm each item before closing the issue.
+      options:
+        - label: All acceptance criteria are met and were demonstrated, not assumed
+        - label: The change is documented where a future reader will look for it
+        - label: "`.env.example` and `README.md` are updated if behaviour or setup changed"
+        - label: The full stack starts cleanly from a fresh clone after the change
+        - label: The change has been reviewed and approved by at least one other engineer

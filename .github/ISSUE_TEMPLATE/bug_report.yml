@@ -1,0 +1,123 @@
+name: Bug report
+description: Report defective behaviour in something already delivered.
+title: "[Bug] "
+labels:
+  - "type:bug"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to report this. The single most valuable thing you can provide
+        is a reliable way to reproduce the problem — a report someone else can reproduce is usually
+        fixed quickly, while one that cannot be reproduced often cannot be fixed at all.
+
+        If you are unsure whether something is a bug or intended behaviour, open the report anyway
+        and say so. An incorrect report costs a few minutes; an unreported defect can cost far more.
+
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      description: One sentence describing what is wrong.
+      placeholder: The readiness endpoint returns 200 while the database is unavailable.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: What did you expect to happen, and what led you to expect it?
+      placeholder: >
+        With the database stopped, the readiness endpoint should return a non-200 status, as
+        described in M6-01.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: >
+        What actually happened? Include the exact error message or response if there was one —
+        paraphrasing an error frequently loses the detail that identifies the cause.
+      placeholder: 'The endpoint returned 200 with body {"status": "ok"}.'
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: >
+        Numbered steps, starting from a clean state. Assume the reader has a fresh clone and knows
+        nothing about what you were doing beforehand.
+      value: |
+        1. 
+        2. 
+        3. 
+    validations:
+      required: true
+
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Where did this occur?
+      options:
+        - "Local — Docker Compose, development profile"
+        - "Local — Docker Compose, production-like profile"
+        - "CI"
+        - "Deployed environment"
+        - "Other (describe in Versions below)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: versions
+    attributes:
+      label: Versions and platform
+      description: >
+        Host operating system, Docker version, and the commit or template version you are on. Bugs
+        that appear on one platform and not another are common, so this is rarely irrelevant.
+      value: |
+        - Host OS: 
+        - Docker version: 
+        - Commit / template version: 
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and traceback
+      description: >
+        Relevant log output or the full traceback. This is automatically rendered as code, so no
+        backticks are needed. Remove any credentials, tokens, or personal data before pasting.
+      render: text
+    validations:
+      required: false
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      description: Your best assessment. It will be confirmed during triage, so an approximate answer is fine.
+      options:
+        - "Critical — data loss, security issue, or the service is unusable"
+        - "High — a core workflow is broken with no workaround"
+        - "Medium — a workflow is broken but a workaround exists"
+        - "Low — minor or cosmetic"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and this has not already been reported
+          required: true
+        - label: I reproduced this on the latest `main`
+          required: true
+        - label: I removed all credentials and personal data from the logs above
+          required: true

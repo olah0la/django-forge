@@ -1,0 +1,105 @@
+name: Epic
+description: A parent issue tracking a milestone or other large body of work.
+title: "[Epic] "
+labels:
+  - "type:epic"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        An epic **tracks** work; it does not specify it. Keep this issue focused on the goal, the
+        boundaries, and how completion is recognised — the detail belongs in the child task issues.
+
+        Most epics on this project correspond to a milestone in
+        `milestones.md` in the repository root, and can be filled in from it directly.
+
+  - type: input
+    id: goal
+    attributes:
+      label: Goal
+      description: The outcome in one sentence. If you cannot tell whether the goal is met, rewrite it.
+      placeholder: The application builds and runs in Docker, identically on every developer's machine.
+    validations:
+      required: true
+
+  - type: textarea
+    id: rationale
+    attributes:
+      label: Why this matters
+      description: >
+        The rationale, written for someone who has not built a production Django service before.
+        This is the section people return to months later when asking why the work was prioritised.
+    validations:
+      required: true
+
+  - type: textarea
+    id: in-scope
+    attributes:
+      label: In scope
+      description: The concrete deliverables this epic covers.
+      value: |
+        - 
+        - 
+        - 
+    validations:
+      required: true
+
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Out of scope
+      description: >
+        What this epic deliberately excludes, and where that work belongs instead. Stating this
+        explicitly prevents scope creep and stops the omission being mistaken for an oversight.
+      value: |
+        - 
+        - 
+    validations:
+      required: true
+
+  - type: textarea
+    id: children
+    attributes:
+      label: Child issues
+      description: >
+        The task issues that close this epic, as a checklist. GitHub renders these as a tracked task
+        list, so epic progress updates automatically as each child is closed.
+      value: |
+        - [ ] #
+        - [ ] #
+        - [ ] #
+    validations:
+      required: false
+
+  - type: textarea
+    id: exit-criteria
+    attributes:
+      label: Exit criteria
+      description: >
+        Objectively checkable statements. When all are true, the epic closes. These are usually the
+        milestone's exit criteria copied from `milestones.md`.
+      value: |
+        - [ ] 
+        - [ ] 
+        - [ ] 
+    validations:
+      required: true
+
+  - type: textarea
+    id: risks
+    attributes:
+      label: Key risks
+      description: >
+        Optional. The one or two things that realistically go wrong in this area, so they can be
+        watched for rather than discovered.
+    validations:
+      required: false
+
+  - type: input
+    id: milestone
+    attributes:
+      label: Related milestone
+      description: The milestone this epic tracks, as named in `milestones.md`.
+      placeholder: M2 — Containerization
+    validations:
+      required: false
