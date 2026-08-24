@@ -144,6 +144,10 @@ make shell       # a shell inside the app container — `whoami` returns `app`, 
 make down        # stop everything, both profiles
 ```
 
+The development stack **mounts your working copy into the container**, so an edit on your machine
+takes effect immediately with no rebuild. The production-like stack deliberately does not — it runs
+the image exactly as built. See [CONTRIBUTING.md](CONTRIBUTING.md) for the details.
+
 Both containers report a **health status**, so `make ps` shows `Up 20 seconds (healthy)` rather
 than just `Up`. Today the check proves the container's runtime is intact — the interpreter and the
 installed virtualenv work. It does *not* yet prove the application can serve traffic, because there

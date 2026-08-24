@@ -88,12 +88,20 @@ services:
       # host:container. Override the host side with APP_PORT when 8000 is taken.
       - "${APP_PORT:-8000}:8000"
 
-    # TODO(M2-07): mount the source tree here so edits reload without a rebuild.
-    #   volumes:
-    #     - ./src:/app/src
-    # Mount deliberately — a bind mount over all of /app would shadow
-    # /app/.venv, which exists in the image and not on the host, and the
-    # container would fail with a confusing "module not found".
+    # --- hot-reload source mount (development only) ---------------------------
+    # The whole project is mounted over /app, so an edit on the host is visible
+    # inside the container immediately and no rebuild is needed.
+    #
+    # This is safe ONLY because the virtualenv lives at /opt/venv, outside the
+    # mounted path (see UV_PROJECT_ENVIRONMENT in the Dockerfile). If the venv
+    # were still at /app/.venv this mount would hide it and every import would
+    # fail with "module not found". Do not move it back.
+    #
+    # A rebuild is still required when dependencies change: uv.lock is installed
+    # into the image at build time, not read from the mount.
+    volumes:
+      - .:/app
+
 
     # TODO(M4-01): depends_on the `db` service, with `condition:
     # service_healthy` from M2-06 rather than a bare dependency. `depends_on`
@@ -154,6 +162,11 @@ services:
   # debug, no build arguments tailored to one developer's machine.
   app-prod:
     <<: *app-base
+
+    # No `volumes:` here, deliberately. This service runs the image exactly as
+    # built — that is what makes it a faithful stand-in for a deployment, and
+    # what lets a production-only problem be reproduced locally. Mounting source
+    # here would defeat the purpose of having two profiles at all.
 
     profiles:
       - prod

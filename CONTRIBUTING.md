@@ -39,6 +39,46 @@ That is the whole setup. `make help` lists every available task.
 > naming the issue that replaces them. Targets tagged `[M3]` in `make help` are defined but will
 > tell you which file is missing and which issue delivers it. That is expected, not a broken setup.
 
+## Hot-reload development loop
+
+The development stack mounts your working copy into the container, so **an edit on your machine is
+live inside the container immediately** — no rebuild, no restart.
+
+```bash
+make up          # start the development stack
+# edit any file in your editor
+# the change is already in the container
+```
+
+**What is mounted.** The whole project directory, onto `/app`. That includes files you create after
+the container started.
+
+**When you still need a rebuild.** Dependency changes. `uv.lock` is installed into the image at build
+time, not read from the mount, so after editing dependencies:
+
+```bash
+make lock        # re-resolve into uv.lock
+make build       # reinstall them in the image
+make up
+```
+
+**The production-like stack is deliberately not mounted.** `make up-prod` runs the image exactly as
+built, which is what makes it a faithful stand-in for a deployment. If you change a file and it does
+not take effect there, that is correct behaviour, not a bug.
+
+### Two things not to "fix"
+
+**The virtualenv lives at `/opt/venv`, not `/app/.venv`.** It has to sit outside the mounted path:
+the mount covers all of `/app`, and a venv underneath it would be hidden the moment the stack
+starts, so every import would fail with a confusing "module not found". If you move it back, the
+development stack breaks.
+
+**The development image is built with your uid and gid.** The `Makefile` exports them from `id -u`
+and `id -g`, and Compose passes them as build arguments. A bind mount preserves *numeric* ownership,
+so without this the container writes files onto your machine owned by a user that does not exist,
+and files you own can be unwritable inside the container. This bites on Linux; macOS hides it behind
+its filesystem translation layer, so test on Linux before assuming it is fine.
+
 ## Picking something to work on
 
 1. **Start with a [`good first issue`](https://github.com/olah0la/django-forge/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).**

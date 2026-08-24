@@ -36,7 +36,12 @@ ENV UV_COMPILE_BYTECODE=1 \
     # copied to another stage, so it has to be self-contained.
     UV_LINK_MODE=copy \
     # Use the interpreter already in this base image; do not fetch a second one.
-    UV_PYTHON_DOWNLOADS=never
+    UV_PYTHON_DOWNLOADS=never \
+    # Build the virtualenv OUTSIDE the project directory. In development the
+    # host source tree is bind-mounted over /app (M2-07); a venv at
+    # /app/.venv would be hidden by that mount and every import would fail
+    # with a confusing "module not found". /opt/venv is never mounted over.
+    UV_PROJECT_ENVIRONMENT=/opt/venv
 
 WORKDIR /app
 
@@ -76,7 +81,7 @@ ENV \
     PYTHONDONTWRITEBYTECODE=1 \
     # Put the venv first on PATH so `python` is the venv's interpreter with no
     # activation step.
-    PATH="/app/.venv/bin:$PATH" \
+    PATH="/opt/venv/bin:$PATH" \
     # `USER` does NOT set HOME — without this line it stays /root, which the
     # app user cannot write, and anything caching under $HOME fails with a
     # confusing permission error rather than an obvious one.
@@ -85,7 +90,7 @@ ENV \
 WORKDIR /app
 
 # The only thing carried over from the builder.
-COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /opt/venv /opt/venv
 
 # --- the unprivileged user ------------------------------------------------
 # UID/GID are build arguments so a Compose dev profile can match the host user
@@ -97,7 +102,8 @@ ARG APP_UID=1000
 ARG APP_GID=1000
 
 # `chown app:app /app` is NOT recursive, and that is the point: the working
-# directory becomes writable, while /app/.venv stays root-owned and merely
+# directory becomes writable, while the venv at /opt/venv stays root-owned and
+# lives outside /app entirely — so a bind mount cannot expose it either. Merely
 # readable. A process that gets code execution therefore cannot rewrite its own
 # dependencies or pip-install into the venv.
 RUN groupadd --gid ${APP_GID} app \

@@ -18,6 +18,13 @@ SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
 UV      ?= uv
+# Match the container user to the developer running make. A bind mount keeps
+# numeric ownership, so without these the dev container writes files onto the
+# host owned by uid 1000. `export` puts them in the environment of every recipe,
+# where docker-compose.yml picks them up as build args.
+export APP_UID := $(shell id -u)
+export APP_GID := $(shell id -g)
+
 COMPOSE ?= docker compose
 SERVICE ?= app
 MANAGE  ?= python manage.py
