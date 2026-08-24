@@ -125,7 +125,17 @@ Dependency management is in place (M1-02), so the Python environment can already
 Install [uv](https://docs.astral.sh/uv/), then:
 
 ```bash
-uv sync                      # create .venv and install runtime + dev dependencies
+make help        # list every available task — start here
+make install     # create .venv and install runtime + dev dependencies
+make check       # lint, type-check and test
+```
+
+Every routine task has a `make` target (M1-03). Targets tagged `[M2]` or `[M3]` are listed but not
+usable yet — running one tells you which file is missing and which issue delivers it, rather than
+failing with a raw Docker error. The underlying commands are plain `uv`:
+
+```bash
+uv sync                      # what `make install` runs
 uv sync --frozen --no-dev    # runtime only — what production images will install
 uv lock                      # re-resolve after editing dependencies in pyproject.toml
 ```
