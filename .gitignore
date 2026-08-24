@@ -1,4 +1,120 @@
+# ---------------------------------------------------------------------------
+# Local-only working documents
+# ---------------------------------------------------------------------------
+# Planning documents and assistant context kept on disk but never committed.
+# Note: the pattern is `*.local.*`, not `*local.*` — the latter would also match
+# files such as `settings/local.py`, which git would then silently refuse to
+# track.
 CLAUDE.md
-*local.*
+*.local.*
 
+# ---------------------------------------------------------------------------
+# Environment and secrets
+# ---------------------------------------------------------------------------
+# Never commit a real environment file. `.env.example` is the documented
+# template and IS committed, so it is re-included below.
+# The negation must come after the patterns it overrides — order matters.
+.env
+.env.*
+!.env.example
 
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+develop-eggs/
+eggs/
+.eggs/
+sdist/
+wheels/
+*.egg-info/
+*.egg
+MANIFEST
+
+# ---------------------------------------------------------------------------
+# Virtual environments
+# ---------------------------------------------------------------------------
+.venv/
+venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+
+# ---------------------------------------------------------------------------
+# Testing, coverage, and type-checking caches
+# ---------------------------------------------------------------------------
+.pytest_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.cache
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+.ruff_cache/
+
+# ---------------------------------------------------------------------------
+# Django
+# ---------------------------------------------------------------------------
+# Local development database.
+db.sqlite3
+db.sqlite3-journal
+
+# Output of `collectstatic`, and user uploads. Both are generated or runtime
+# data; anchored to the repository root so an app directory named `media/` is
+# not caught by accident.
+/staticfiles/
+/mediafiles/
+/media/
+
+*.log
+local_settings.py
+
+# IMPORTANT: Django migrations are source code and MUST be committed.
+# Do not add `migrations/` here — M4 depends on migration history being
+# tracked, and ignoring it causes schema drift between environments.
+
+# ---------------------------------------------------------------------------
+# Docker
+# ---------------------------------------------------------------------------
+# Per-developer Compose overrides. The committed compose file stays the shared
+# definition; personal tweaks belong here and are not shared.
+docker-compose.override.yml
+docker-compose.override.yaml
+
+# ---------------------------------------------------------------------------
+# Editors and IDEs
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+*.iml
+*.swp
+*.swo
+*~
+.spyderproject
+.spyproject
+.ropeproject
+
+# ---------------------------------------------------------------------------
+# Operating system
+# ---------------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+desktop.ini

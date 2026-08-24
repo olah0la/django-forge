@@ -1,0 +1,59 @@
+# EditorConfig — https://editorconfig.org
+#
+# Keeps indentation, line endings, and encoding consistent across editors
+# without every contributor configuring their editor by hand. Most editors
+# support this natively; a few need a plugin.
+
+root = true
+
+# ---------------------------------------------------------------------------
+# Defaults for every file
+# ---------------------------------------------------------------------------
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+# ---------------------------------------------------------------------------
+# Python — 4 spaces, per PEP 8
+# ---------------------------------------------------------------------------
+[*.py]
+indent_style = space
+indent_size = 4
+
+# ---------------------------------------------------------------------------
+# Data and markup formats — 2 spaces by convention
+# ---------------------------------------------------------------------------
+[*.{yml,yaml}]
+indent_size = 2
+
+[*.{json,html,css,scss,js,ts}]
+indent_size = 2
+
+[*.toml]
+indent_size = 4
+
+# ---------------------------------------------------------------------------
+# Shell scripts — 2 spaces
+# ---------------------------------------------------------------------------
+[*.{sh,bash}]
+indent_size = 2
+
+# ---------------------------------------------------------------------------
+# Makefiles — tabs are REQUIRED
+# ---------------------------------------------------------------------------
+# Make is whitespace-significant: recipe lines must begin with a real tab.
+# Indenting with spaces produces the opaque error `missing separator`.
+[{Makefile,makefile,*.mk}]
+indent_style = tab
+
+# ---------------------------------------------------------------------------
+# Markdown — trailing whitespace is meaningful
+# ---------------------------------------------------------------------------
+# Two trailing spaces are Markdown's hard line break, so trimming would
+# silently change rendered output.
+[*.md]
+trim_trailing_whitespace = false
