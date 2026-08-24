@@ -12,7 +12,9 @@ the start of every project.
 
 > **This repository does not contain a working application yet.**
 >
-> There is no Dockerfile, no Django project, and no dependency manifest. What exists today is the
+> There is no Django project yet. What exists today is a governed repository with locked
+> dependencies (**M1**), and a multi-stage `Dockerfile` that builds a runtime image — one with no
+> application inside it to run (**M2**, in progress). The rest is still the
 > plan: a seven-milestone roadmap and a backlog of 40 issues, tracked in
 > [GitHub Milestones](https://github.com/olah0la/django-forge/milestones) and
 > [Issues](https://github.com/olah0la/django-forge/issues).
@@ -70,8 +72,8 @@ the ones before it, so reordering them creates rework.
 
 | # | Milestone | Goal | Status |
 | --- | --- | --- | --- |
-| **M1** | Foundation & Developer Environment | A reproducible, well-governed repository | 🔜 Not started |
-| **M2** | Containerization | The project builds and runs in Docker, identically for everyone | 🔜 Not started |
+| **M1** | Foundation & Developer Environment | A reproducible, well-governed repository | ✅ Complete |
+| **M2** | Containerization | The project builds and runs in Docker, identically for everyone | 🚧 In progress |
 | **M3** | Django Project Scaffold & Configuration | A Django project with 12-factor configuration | 🔜 Not started |
 | **M4** | Persistence Layer | PostgreSQL, migrations, and shared model foundations | 🔜 Not started |
 | **M5** | API Layer (Django Ninja) | A versioned, documented, consistently-erroring HTTP API | 🔜 Not started |

@@ -1,0 +1,160 @@
+# ---------------------------------------------------------------------------
+# Docker build context exclusions
+# ---------------------------------------------------------------------------
+# Before a build starts, Docker sends the *build context* — everything in this
+# directory — to the daemon. Whatever is not excluded here is transferred, is
+# walked on every build, and is available to any `COPY . .`.
+#
+# Two reasons this file matters. Speed: `.venv/` alone is ~190 MB of material
+# the image never uses, since dependencies are installed inside the image.
+# Safety: a local `.env` swept into the context can be copied into a
+# distributable image, embedding real credentials in it.
+#
+# NOT interchangeable with .gitignore. This file must exclude `.git` itself,
+# which .gitignore by definition never does. The syntax also differs: patterns
+# are anchored to the context root, so nested matches need an explicit `**/`
+# prefix — `__pycache__` matches only the top level, `**/__pycache__` matches
+# every level.
+
+# ---------------------------------------------------------------------------
+# Version control and CI
+# ---------------------------------------------------------------------------
+# `.git` is the single largest avoidable item in most repositories and grows
+# with every commit. Nothing in the image reads project history.
+.git
+.gitignore
+.gitattributes
+.github
+
+# ---------------------------------------------------------------------------
+# Environment and secrets
+# ---------------------------------------------------------------------------
+# The security-relevant section. A real `.env` must never enter the context:
+# once it is there, one careless `COPY . .` bakes live credentials into an
+# image that may be pushed to a registry. Configuration reaches the container
+# at run time, through the environment — never at build time.
+# `.env.example` is the committed template and carries no real values, so it is
+# re-included. The negation must follow the patterns it overrides.
+.env
+.env.*
+!.env.example
+
+# ---------------------------------------------------------------------------
+# Virtual environments
+# ---------------------------------------------------------------------------
+# The bulk of the context. A host virtualenv is also built for the host's
+# platform and interpreter, so copying one in would be actively wrong: the
+# image builds its own with `uv sync`.
+.venv
+venv
+ENV
+env
+env.bak
+venv.bak
+
+# ---------------------------------------------------------------------------
+# Python caches and build output
+# ---------------------------------------------------------------------------
+# Regenerated inside the image (the builder sets UV_COMPILE_BYTECODE=1).
+# Host-built artifacts can carry the wrong architecture.
+**/__pycache__
+**/*.py[cod]
+**/*$py.class
+**/*.so
+**/*.egg-info
+**/*.egg
+build
+dist
+sdist
+wheels
+develop-eggs
+eggs
+.eggs
+MANIFEST
+
+# ---------------------------------------------------------------------------
+# Test, coverage and type-checking caches
+# ---------------------------------------------------------------------------
+# Machine-local state. Test tooling is excluded from the runtime image anyway
+# (`uv sync --no-dev`), so its caches have nothing to say here.
+.pytest_cache
+.tox
+.nox
+.coverage
+.coverage.*
+coverage.xml
+htmlcov
+.cache
+.mypy_cache
+.dmypy.json
+dmypy.json
+.pyre
+.pytype
+.ruff_cache
+
+# ---------------------------------------------------------------------------
+# Documentation and project meta
+# ---------------------------------------------------------------------------
+# Prose is for people reading the repository, not for the running service.
+docs
+CONTRIBUTING.md
+CHANGELOG.md
+# README.md and LICENSE are the exceptions: pyproject.toml declares
+# `readme = "README.md"` and `license-files = ["LICENSE"]`, so the build
+# backend needs both present the moment the project itself is installed
+# (M3-01, when `uv sync` drops `--no-install-project`). Excluding them fails
+# the build with a confusing "file not found" from the backend.
+!README.md
+!LICENSE
+
+# ---------------------------------------------------------------------------
+# Docker's own files
+# ---------------------------------------------------------------------------
+# The Dockerfile is read out of band by the daemon, not from the context, so
+# excluding it is safe and keeps it from being copied into the image.
+Dockerfile*
+.dockerignore
+docker-compose*.yml
+docker-compose*.yaml
+
+# ---------------------------------------------------------------------------
+# Local working documents
+# ---------------------------------------------------------------------------
+# Mirrors .gitignore: planning notes and assistant context, kept on disk but
+# neither committed nor shipped.
+**/*.local.*
+CLAUDE.md
+
+# ---------------------------------------------------------------------------
+# Django runtime data
+# ---------------------------------------------------------------------------
+# Generated or user-supplied at run time, and environment-specific. Static
+# files are collected during the build or at startup, never copied from a
+# developer's machine.
+db.sqlite3
+db.sqlite3-journal
+staticfiles
+mediafiles
+media
+**/*.log
+**/local_settings.py
+
+# ---------------------------------------------------------------------------
+# Editors, IDEs and operating systems
+# ---------------------------------------------------------------------------
+.vscode
+.idea
+**/*.iml
+**/*.swp
+**/*.swo
+**/*~
+.spyderproject
+.spyproject
+.ropeproject
+**/.DS_Store
+**/._*
+.Spotlight-V100
+.Trashes
+**/Thumbs.db
+**/ehthumbs.db
+**/desktop.ini
