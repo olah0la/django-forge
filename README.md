@@ -49,8 +49,10 @@ to record it as an Architecture Decision Record rather than leave the next team 
 
 | Technology | Role | Why this choice |
 | --- | --- | --- |
-| **Django** | Web framework | Mature, batteries-included, and the ORM plus migration system removes a large class of work you would otherwise hand-roll |
+| **Python 3.12** | Language | Pinned to a single minor version so local and container environments agree; declared in `.python-version` and `pyproject.toml` |
+| **Django 5.2 LTS** | Web framework | Mature, batteries-included, and the ORM plus migration system removes a large class of work you would otherwise hand-roll. The LTS line receives security fixes until roughly April 2028, so derived projects are not forced into a framework upgrade within the year |
 | **Django Ninja** | API layer | Builds APIs from standard Python type hints, generating request validation and OpenAPI documentation automatically — the type hints *are* the contract |
+| **uv** | Dependency management | Fast, standards-based (PEP 621 / PEP 735), and `uv.lock` pins exact versions and hashes so installs are reproducible — see [ADR 0001](docs/adr/0001-dependency-manager.md) |
 | **PostgreSQL** | Database | The production-grade default; developing against the same engine you deploy to avoids a whole category of production-only bugs |
 | **Docker + Compose** | Runtime & local stack | Bundles the app with the exact runtime it needs, so behaviour is identical across machines and in production |
 | **ASGI** (Gunicorn + Uvicorn workers) | Application server | Django Ninja supports async endpoints; committing to ASGI now keeps that option open at no cost today |
@@ -116,6 +118,23 @@ make up                 # start the full stack
 
 **Planned prerequisites:** Docker and Docker Compose. Everything else runs inside containers, so no
 local Python installation or virtual environment is required.
+
+### ✅ What works today
+
+Dependency management is in place (M1-02), so the Python environment can already be installed.
+Install [uv](https://docs.astral.sh/uv/), then:
+
+```bash
+uv sync                      # create .venv and install runtime + dev dependencies
+uv sync --frozen --no-dev    # runtime only — what production images will install
+uv lock                      # re-resolve after editing dependencies in pyproject.toml
+```
+
+`uv` reads the pinned interpreter from `.python-version` and provisions Python 3.12 itself, so no
+local Python installation is needed. **`uv.lock` is committed and must never be edited by hand** —
+it is what makes every install resolve to identical versions.
+
+There is nothing to run yet beyond installing: the Django project arrives in M3.
 
 ---
 

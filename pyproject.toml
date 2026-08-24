@@ -1,0 +1,99 @@
+# ---------------------------------------------------------------------------
+# django-forge — project metadata and tooling configuration
+# ---------------------------------------------------------------------------
+# Dependencies are managed with uv (https://docs.astral.sh/uv/).
+# The exact resolved versions live in uv.lock, which IS committed — that file
+# is what makes an install today and an install in six months identical.
+#
+#   uv sync                     install runtime + dev dependencies
+#   uv sync --frozen --no-dev   install runtime only (used by production images)
+#   uv lock                     re-resolve after changing dependencies below
+#
+# Never edit uv.lock by hand.
+
+[project]
+name = "django-forge"
+version = "0.1.0"
+description = "A production-minded starting point for dockerized Django backend projects."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+
+# Runtime dependencies: everything the application needs to serve a request.
+# Anything used only while developing belongs in [dependency-groups] below, so
+# production images do not ship it.
+#
+# Ranges here allow security patches; uv.lock supplies the exact pin.
+dependencies = [
+    # Web framework. 5.2 is a Long-Term Support release: security fixes until
+    # roughly April 2028. Derived projects inherit that support window, which is
+    # why the LTS line is preferred over the newest feature release.
+    "django>=5.2,<6.0",
+    # API layer, built on Python type hints. NOT Django REST Framework —
+    # see README. Required from M5.
+    "django-ninja>=1.6,<2.0",
+    # PostgreSQL driver (M4). The [binary] extra ships prebuilt wheels, so no
+    # local compiler is needed. M2-01 should revisit this for the production
+    # image, where psycopg[c] can be preferable.
+    "psycopg[binary]>=3.3,<4.0",
+    # Production application server and ASGI workers (M6).
+    "gunicorn>=26.0,<27.0",
+    "uvicorn[standard]>=0.52,<1.0",
+    # Typed environment-variable parsing (M3-03). Converts and validates env
+    # values so misconfiguration fails loudly at startup rather than behaving
+    # strangely later.
+    "django-environ>=0.14,<1.0",
+]
+
+# ---------------------------------------------------------------------------
+# Development dependencies (PEP 735)
+# ---------------------------------------------------------------------------
+# Installed by `uv sync`, excluded by `uv sync --no-dev`. Keeping these out of
+# the runtime image saves size and removes unnecessary attack surface.
+[dependency-groups]
+dev = [
+    "ruff>=0.16,<1.0",              # linting and formatting
+    "mypy>=2.3,<3.0",               # static type checking
+    "django-stubs[compatible-mypy]>=6.1,<7.0",
+    "pytest>=9.1,<10.0",
+    "pytest-django>=4.14,<5.0",
+]
+
+# ---------------------------------------------------------------------------
+# Tooling configuration
+# ---------------------------------------------------------------------------
+# Configured here so settings live in one file. Wiring these into automation is
+# deferred with the rest of the quality-gates phase; running them by hand works
+# today.
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+exclude = [".venv", "migrations"]
+
+[tool.ruff.lint]
+# A deliberately modest starting set. Expand it when the CI phase lands, rather
+# than enabling everything at once against a codebase that cannot yet be run.
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "I",    # import sorting
+    "UP",   # pyupgrade — modernises syntax for the target Python
+    "B",    # flake8-bugbear — likely bugs
+    "DJ",   # flake8-django
+]
+
+[tool.mypy]
+python_version = "3.12"
+warn_unused_ignores = true
+warn_redundant_casts = true
+# Not yet strict. Tightening this against real code is easier than loosening it
+# after a wave of ignore comments has been added to silence it.
+ignore_missing_imports = true
+exclude = ["migrations/"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# DJANGO_SETTINGS_MODULE cannot be set yet — no settings module exists until
+# M3-02 creates one. Uncomment and point it at the test settings layer then;
+# pointing it at a non-existent module now would fail collection confusingly.
+# DJANGO_SETTINGS_MODULE = "config.settings.test"
