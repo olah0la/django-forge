@@ -159,6 +159,51 @@ A `.env` is read by **both** Compose profiles. Two variables are therefore comme
 - `DJANGO_SETTINGS_MODULE` — a development value here made the production-like profile silently run
   development settings: debug on, no HSTS, no secure cookies, while still reporting healthy.
 
+## The database
+
+PostgreSQL **17.6** runs as a Compose service. Development uses the same engine as production
+because SQLite differs in transaction behaviour, type handling and constraint enforcement — a class
+of bugs that would otherwise appear only after deploy.
+
+```bash
+make up          # starts the app and the database
+make db-shell    # a psql session inside the container
+```
+
+**Why the minor version is pinned.** Tracking a major tag such as `postgres:17` means an unexpected
+major upgrade can leave the existing data directory unreadable: the container starts, refuses to
+read its own data, and the local database is effectively gone. Keep the pin in step with whatever
+production runs.
+
+**Why Debian and not Alpine.** Alpine would save around 150 MB, but musl's collation differs from
+glibc, so text ordering and some index behaviour would not match managed PostgreSQL services — which
+is precisely the local-versus-production divergence this service exists to remove.
+
+**The port is not published.** The app reaches the database over the Compose network and `make
+db-shell` runs inside the container, so nothing needs a host port — and publishing 5432 collides
+with any locally-installed PostgreSQL. For a GUI client, add a git-ignored
+`docker-compose.override.yml`:
+
+```yaml
+services:
+  db:
+    ports: ["5433:5432"]
+```
+
+### ⚠️ Which command destroys your data
+
+| Command | Effect |
+| --- | --- |
+| `make down` | Stops containers, **keeps** the database |
+| `docker compose down -v` | **Deletes** the volume — unrecoverable, no prompt |
+
+The difference is one flag. `make down` never passes `-v`, so the destructive form has to be typed
+deliberately.
+
+**Django does not use PostgreSQL yet.** Settings still point at SQLite; **M4-02** wires them to
+`DATABASE_URL`. The entrypoint already waits for the database to accept queries before the
+application starts.
+
 ## Adding an application
 
 ```bash

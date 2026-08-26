@@ -89,6 +89,11 @@ services:
       # settings, so it proved nothing. Each service owns its own layer.
       DJANGO_SETTINGS_MODULE: "config.settings.development"
 
+      # The entrypoint (M2-05) waits for this to accept queries before starting
+      # the application. Django itself does NOT read it yet — M4-02 wires
+      # settings to it; until then the app still uses SQLite.
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-forge}:${POSTGRES_PASSWORD:-forge}@db:5432/${POSTGRES_DB:-forge}"
+
     ports:
       # host:container. Override the host side with APP_PORT when 8000 is taken.
       - "${APP_PORT:-8000}:8000"
@@ -108,10 +113,16 @@ services:
       - .:/app
 
 
-    # TODO(M4-01): depends_on the `db` service, with `condition:
-    # service_healthy` from M2-06 rather than a bare dependency. `depends_on`
-    # alone waits for the container to START, not for Postgres to accept
-    # connections, which is a race that only shows up on slow machines.
+    # Wait for the database to be READY, not merely started.
+    #
+    # A bare `depends_on` waits only for the container to start. Postgres
+    # accepts TCP connections well before it will answer a query, so the app
+    # would connect too early and fail on its first statement — a race that
+    # shows up on slow machines and in CI, and not on the developer's laptop.
+    # `condition: service_healthy` waits for the db health check below.
+    depends_on:
+      db:
+        condition: service_healthy
 
     # --- health check -------------------------------------------------------
     # Inherited from the image (see HEALTHCHECK in the Dockerfile), so every
@@ -119,33 +130,6 @@ services:
     # STATUS of "(healthy)". Override here only if dev and prod ever need
     # genuinely different probes.
     #
-    # TODO(M4-01): once the `db` service exists, gate this service on it being
-    # READY rather than merely started. Uncomment both blocks together:
-    #
-    #     depends_on:
-    #       db:
-    #         condition: service_healthy
-    #
-    # and add the db service with its own check:
-    #
-    #     db:
-    #       image: postgres:16-alpine
-    #       healthcheck:
-    #         # pg_isready ships with the postgres image. `-U` matters: without
-    #         # it the check uses the wrong default user and can report failure
-    #         # on a perfectly healthy database.
-    #         test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-    #         interval: 10s
-    #         timeout: 5s
-    #         start_period: 30s   # initdb runs on first boot and is slow
-    #         retries: 5
-    #
-    # Why `condition: service_healthy` and not a bare `depends_on`: a bare
-    # dependency waits only for the container to START. Postgres accepts TCP
-    # connections well before it will answer a query, so the app would connect
-    # too early and fail on its first statement — a race that shows up on slow
-    # machines and in CI, and not on the developer's laptop.
-
     # --- development server --------------------------------------------------
     # uvicorn serves config/asgi.py, so development uses the SAME interface as
     # production. Django's runserver is WSGI-only, which would have left the
@@ -172,6 +156,71 @@ services:
       - --reload
       - --reload-dir
       - /app
+
+  # -------------------------------------------------------------------------
+  # db — PostgreSQL
+  # -------------------------------------------------------------------------
+  # Develop against the same engine production runs. SQLite differs in
+  # transaction behaviour, type handling and constraint enforcement, so a class
+  # of bugs would appear only after deploy.
+  db:
+    # PINNED TO A MINOR VERSION, deliberately. Tracking a major tag such as
+    # `postgres:17` means an unexpected major upgrade can leave the existing
+    # data directory unreadable: the container starts, refuses to read its own
+    # data, and the local database is effectively gone.
+    #
+    # Debian, not Alpine. Alpine saves ~150 MB but uses musl, whose collation
+    # differs from glibc — text ordering and some index behaviour would then not
+    # match managed PostgreSQL services, reintroducing the local-vs-production
+    # divergence this service exists to remove.
+    #
+    # Keep this in step with whatever production actually runs.
+    image: postgres:17.6
+
+    environment:
+      # Throwaway development defaults so a clean checkout runs with no setup.
+      # They protect nothing and are not secrets; override them in .env.
+      POSTGRES_USER: "${POSTGRES_USER:-forge}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-forge}"
+      POSTGRES_DB: "${POSTGRES_DB:-forge}"
+
+    volumes:
+      # A NAMED volume, so data outlives the container.
+      #   docker compose down      keeps it
+      #   docker compose down -v   DESTROYS it, unrecoverably
+      - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      # pg_isready ships with the image. `-U` matters: without it the check
+      # uses a default user that may not exist and reports a perfectly healthy
+      # database as failing. The doubled $$ is Compose escaping — it passes a
+      # literal $ through to the shell instead of substituting at parse time.
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      # initdb runs on first boot and is slow; too short a start period reports
+      # a healthy database as failing and restarts it in a loop.
+      start_period: 30s
+      retries: 5
+
+    restart: unless-stopped
+
+    # NOT published to the host, deliberately.
+    #
+    # The application reaches the database over the Compose network, and
+    # `make db-shell` runs psql inside the container, so nothing here needs a
+    # host port. Publishing 5432 by default collides with any locally-installed
+    # PostgreSQL, and the whole stack then refuses to start with "address
+    # already in use" — a poor first experience for a template. (This is not
+    # hypothetical: it happened on the machine this was built on.)
+    #
+    # To reach it from a GUI client, add a personal override — the file is
+    # already git-ignored, so it stays yours:
+    #
+    #     # docker-compose.override.yml
+    #     services:
+    #       db:
+    #         ports: ["5433:5432"]
 
   # -------------------------------------------------------------------------
   # app-prod — the production-like stack (opt-in)
@@ -229,10 +278,9 @@ services:
 # ---------------------------------------------------------------------------
 # Volumes
 # ---------------------------------------------------------------------------
-# Intentionally absent. Named volumes are for state that must outlive a
-# container, and nothing in this stack holds state yet: the application is
-# stateless and there is no database until M4-01, which adds the `db` service
-# and a named volume for its data directory.
+volumes:
+  # PostgreSQL's data directory. Named, so it survives container replacement.
+  postgres_data:
 #
 # When it does, note that `docker compose down` keeps volumes and
 # `docker compose down -v` destroys them. The second is unrecoverable.

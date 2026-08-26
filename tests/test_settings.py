@@ -274,3 +274,63 @@ def test_env_example_does_not_set_layer_specific_values():
             line for line in example.splitlines() if line.strip().startswith(f"{var}=")
         ]
         assert not uncommented, f"{var} must be commented out in .env.example: {uncommented}"
+
+
+# ---------------------------------------------------------------------------
+# The database service (M4-01)
+# ---------------------------------------------------------------------------
+def _compose() -> str:
+    return (REPO_ROOT / "docker-compose.yml").read_text()
+
+
+def test_postgres_is_pinned_to_a_minor_version():
+    """A major-tag pin can leave an existing data directory unreadable.
+
+    `postgres:17` would silently become 18 one day; the container then starts,
+    refuses to read its own data directory, and the local database is gone.
+    """
+    compose = _compose()
+    assert "image: postgres:17.6" in compose
+    assert not re.search(r"image:\s*postgres:\d+\s*$", compose, re.M), (
+        "PostgreSQL must be pinned to a minor version, not a major tag"
+    )
+
+
+def test_postgres_uses_a_named_volume():
+    compose = _compose()
+    assert "postgres_data:/var/lib/postgresql/data" in compose
+    assert re.search(r"^volumes:\s*$", compose, re.M), "no top-level volumes declaration"
+
+
+def test_app_waits_for_database_health_not_merely_start():
+    """Closes an M2-06 criterion.
+
+    A bare `depends_on` waits only for the container to start; Postgres accepts
+    TCP connections well before it answers a query.
+    """
+    compose = _compose()
+    assert "condition: service_healthy" in compose
+
+
+def test_database_healthcheck_passes_the_user_flag():
+    """Without -U, pg_isready falls back to a default user that may not exist
+    and reports a healthy database as failing."""
+    compose = _compose()
+    assert "pg_isready -U" in compose
+
+
+def test_database_credentials_are_not_hardcoded():
+    compose = _compose()
+    for var in ("POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB"):
+        assert f'"${{{var}:-' in compose, f"{var} must come from the environment"
+
+
+def test_database_port_is_not_published():
+    """Publishing 5432 collides with any locally-installed PostgreSQL.
+
+    Regression: it did exactly that on the machine this was built on, and the
+    whole stack failed to start with "address already in use".
+    """
+    compose = _compose()
+    db_block = compose[compose.index("  db:") : compose.index("  # ----", compose.index("  db:"))]
+    assert "5432:5432" not in db_block

@@ -14,8 +14,16 @@ ALLOWED_HOSTS = ["testserver", "localhost"]
 SECRET_KEY = "test-only-not-a-real-key"  # noqa: S105
 
 # In-memory database: no file on disk, no cleanup, and markedly faster.
-# TODO(M4-01): PostgreSQL-specific behaviour (constraints, transactions, JSON
-# fields) cannot be tested against SQLite. Revisit when the db service exists.
+#
+# Still SQLite even though M4-01 added a PostgreSQL service, deliberately: the
+# current tests cover settings and configuration and touch no database
+# behaviour, so switching would make every run depend on a container for no
+# added coverage.
+#
+# TODO(M4-04): switch to PostgreSQL when the first model or migration test
+# arrives. PostgreSQL-specific behaviour — constraints, transaction semantics,
+# JSON fields, collation — cannot be tested against SQLite, and a test suite
+# that passes on SQLite while production runs PostgreSQL is worse than none.
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",

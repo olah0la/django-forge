@@ -180,6 +180,12 @@ shell: ## [M2] Open a shell inside the application container
 	@$(call require,$(COMPOSE_FILE),M2-04 (docker-compose.yml))
 	$(COMPOSE) exec $(SERVICE) bash
 
+db-shell: ## [M4] Open a psql session against the development database
+	@$(call require,$(COMPOSE_FILE),M2-04 (docker-compose.yml))
+	@# Runs inside the container, so no host port needs publishing and no local
+	@# psql client is required.
+	$(COMPOSE) exec db psql -U "$${POSTGRES_USER:-forge}" -d "$${POSTGRES_DB:-forge}"
+
 ##@ Django — available from M3
 
 migrate: ## [M3] Apply database migrations
@@ -228,6 +234,6 @@ clean: ## Remove the virtualenv and tool caches (never touches .env or data)
 .PHONY: help install install-prod lock upgrade audit \
         lint format typecheck test check \
         build up down logs ps shell \
-        migrate makemigrations django-shell superuser \
+        migrate makemigrations django-shell superuser db-shell \
         backlog-check backlog-plan backlog-sync \
         clean
