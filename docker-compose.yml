@@ -83,7 +83,11 @@ services:
       # would only create a second, wrong source of truth. Everything else
       # arrives through env_file above.
       DJANGO_DEBUG: "${DJANGO_DEBUG:-1}"
-      DJANGO_SETTINGS_MODULE: "${DJANGO_SETTINGS_MODULE:-config.settings.development}"
+      # Pinned, NOT overridable. A shared .env would otherwise set the layer
+      # for both services at once: a DJANGO_SETTINGS_MODULE meant for local
+      # work silently made the production-like profile run DEVELOPMENT
+      # settings, so it proved nothing. Each service owns its own layer.
+      DJANGO_SETTINGS_MODULE: "config.settings.development"
 
     ports:
       # host:container. Override the host side with APP_PORT when 8000 is taken.
@@ -187,7 +191,7 @@ services:
 
     environment:
       DJANGO_DEBUG: "0"
-      DJANGO_SETTINGS_MODULE: "${DJANGO_SETTINGS_MODULE:-config.settings.production}"
+      DJANGO_SETTINGS_MODULE: "config.settings.production"   # pinned; see app
 
       # Passed through, NOT defaulted: the production layer requires them
       # (M3-03) and refuses to start without them. Compose interpolates this

@@ -42,7 +42,16 @@ def load_settings():
             text=True,
             # A clean environment: only what the test supplies, so a variable
             # left over from the developer's shell cannot mask a failure.
-            env={"PATH": "/usr/bin:/bin", "HOME": "/tmp", **env},
+            env={
+                "PATH": "/usr/bin:/bin",
+                "HOME": "/tmp",
+                # Point .env loading at a path that cannot exist. Without this
+                # the tests read whatever .env the developer happens to have,
+                # so the same commit passes on one machine and fails on
+                # another — which is exactly what happened before this line.
+                "DJANGO_ENV_FILE": "/nonexistent/.env",
+                **env,
+            },
         )
         return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
 

@@ -125,6 +125,40 @@ the application in `ASGIStaticFilesHandler` **only when `DEBUG` is true**, so th
 in development. Production is deliberately untouched — M6-03 decides how static files are served
 there.
 
+## Production hardening
+
+`make audit` runs Django's deploy checks against the production layer and a secret scan over the
+full git history. Both must be clean before a release.
+
+| Setting | Default | Why |
+| --- | --- | --- |
+| `SESSION_COOKIE_SECURE` / `CSRF_COOKIE_SECURE` | `True` | Unconditional — no production reason to send these in plaintext |
+| `SECURE_SSL_REDIRECT` | `True` | Set false where TLS terminates upstream and the balancer already redirects |
+| `SECURE_PROXY_SSL_HEADER` | **off** | Opt in with `DJANGO_TRUST_PROXY_SSL_HEADER` |
+| `SECURE_HSTS_SECONDS` | `3600` | One hour, not one year — see below |
+
+**Why the proxy header is opt-in.** Trusting `X-Forwarded-Proto` unconditionally is itself a
+vulnerability: if the application is ever reachable directly, a client can send the header
+themselves and convince Django a plaintext request was secure. Enable it only behind a proxy that
+**overwrites** the header on every request.
+
+**Why HSTS starts at one hour.** Browsers cache the policy. Advertising a year before HTTPS is
+proven stable can make the site unreachable for a year, and you cannot clear it from users'
+browsers. Ramp it once HTTPS is stable: `3600` → `86400` → `31536000`, then consider preload.
+
+**One check is waived:** `security.W021` (HSTS preload). Preload is a commitment to a browser-vendor
+list that is slow to leave, and a template must not make it on a derived project's behalf. The
+justification is written out in `config/settings/production.py`; enabling it is one variable.
+
+### Layer-specific values do not belong in `.env`
+
+A `.env` is read by **both** Compose profiles. Two variables are therefore commented out in
+`.env.example`, and each Compose service pins its own settings module:
+
+- `DJANGO_DEBUG` — a truthy value stops the production profile from starting at all.
+- `DJANGO_SETTINGS_MODULE` — a development value here made the production-like profile silently run
+  development settings: debug on, no HSTS, no secure cookies, while still reporting healthy.
+
 ## Adding an application
 
 ```bash

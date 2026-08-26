@@ -156,3 +156,121 @@ def test_empty_required_variables_are_treated_as_missing(load_settings, supplied
     rc, _, err = load_settings("production", supplied)
     assert rc != 0, f"production started with {supplied}"
     assert "is required but is empty or unset" in err, err
+
+
+# ---------------------------------------------------------------------------
+# Production hardening (M3-05)
+# ---------------------------------------------------------------------------
+PROD_ENV = {
+    "DJANGO_SECRET_KEY": "x" * 60,
+    "DJANGO_ALLOWED_HOSTS": "example.com",
+    "DJANGO_DEBUG": "0",
+}
+
+
+@pytest.mark.parametrize(
+    ("setting", "expected"),
+    [
+        ("SESSION_COOKIE_SECURE", True),
+        ("CSRF_COOKIE_SECURE", True),
+        ("SECURE_SSL_REDIRECT", True),
+        ("SECURE_HSTS_INCLUDE_SUBDOMAINS", True),
+    ],
+)
+def test_production_transport_security(load_settings, setting, expected):
+    rc, out, err = load_settings("production", PROD_ENV, f"{{'v': settings.{setting}}}")
+    assert rc == 0, err
+    assert json.loads(out)["v"] is expected
+
+
+def test_hsts_default_is_conservative(load_settings):
+    """One hour, not one year.
+
+    Browsers cache HSTS. Advertising a year before HTTPS is proven stable can
+    make the site unreachable for a year, and it cannot be cleared remotely.
+    """
+    rc, out, err = load_settings("production", PROD_ENV, "{'v': settings.SECURE_HSTS_SECONDS}")
+    assert rc == 0, err
+    assert json.loads(out)["v"] == 3600
+
+
+def test_hsts_preload_is_not_enabled_by_default(load_settings):
+    """Preload is a commitment a template must not make for derived projects."""
+    rc, out, err = load_settings("production", PROD_ENV, "{'v': settings.SECURE_HSTS_PRELOAD}")
+    assert rc == 0, err
+    assert json.loads(out)["v"] is False
+
+
+def test_proxy_ssl_header_is_opt_in(load_settings):
+    """Trusting X-Forwarded-Proto unconditionally is itself a vulnerability."""
+    expr = "{'v': getattr(settings, 'SECURE_PROXY_SSL_HEADER', None)}"
+    rc, out, err = load_settings("production", PROD_ENV, expr)
+    assert rc == 0, err
+    assert json.loads(out)["v"] is None
+
+    rc, out, err = load_settings(
+        "production", {**PROD_ENV, "DJANGO_TRUST_PROXY_SSL_HEADER": "true"}, expr
+    )
+    assert rc == 0, err
+    assert json.loads(out)["v"] == ["HTTP_X_FORWARDED_PROTO", "https"]
+
+
+def test_ssl_redirect_can_be_disabled_for_load_balancers(load_settings):
+    rc, out, err = load_settings(
+        "production",
+        {**PROD_ENV, "DJANGO_SECURE_SSL_REDIRECT": "false"},
+        "{'v': settings.SECURE_SSL_REDIRECT}",
+    )
+    assert rc == 0, err
+    assert json.loads(out)["v"] is False
+
+
+def test_only_w021_is_silenced_and_it_is_justified(load_settings):
+    """Every silenced check must carry a written reason in the source."""
+    rc, out, err = load_settings(
+        "production", PROD_ENV, "{'v': settings.SILENCED_SYSTEM_CHECKS}"
+    )
+    assert rc == 0, err
+    assert json.loads(out)["v"] == ["security.W021"]
+    source = (SETTINGS_DIR / "production.py").read_text()
+    assert "security.W021 —" in source, "W021 is silenced without a written justification"
+
+
+def test_hardening_does_not_leak_into_development(load_settings):
+    """Secure cookies over plain HTTP would break local login."""
+    rc, out, err = load_settings(
+        "development", {}, "{'v': getattr(settings, 'SESSION_COOKIE_SECURE', False)}"
+    )
+    assert rc == 0, err
+    assert json.loads(out)["v"] is False
+
+
+def test_compose_pins_the_settings_layer_per_service():
+    """A shared .env must not be able to set the layer for both services.
+
+    Regression: docker-compose.yml used ${DJANGO_SETTINGS_MODULE:-...} for both
+    services, so a .env written for local work silently made the
+    production-like profile run DEVELOPMENT settings — DEBUG on, no HSTS, no
+    secure cookies. The profile looked healthy and proved nothing.
+    """
+    compose = (REPO_ROOT / "docker-compose.yml").read_text()
+    assert 'DJANGO_SETTINGS_MODULE: "config.settings.development"' in compose
+    assert 'DJANGO_SETTINGS_MODULE: "config.settings.production"' in compose
+    assert "${DJANGO_SETTINGS_MODULE" not in compose, (
+        "the settings layer must be pinned per service, not interpolated"
+    )
+
+
+def test_env_example_does_not_set_layer_specific_values():
+    """Values that differ per layer must ship commented out.
+
+    A .env is read by both Compose profiles. An uncommented DJANGO_DEBUG there
+    stops production from starting; an uncommented DJANGO_SETTINGS_MODULE makes
+    production run development settings.
+    """
+    example = (REPO_ROOT / ".env.example").read_text()
+    for var in ("DJANGO_DEBUG", "DJANGO_SETTINGS_MODULE"):
+        uncommented = [
+            line for line in example.splitlines() if line.strip().startswith(f"{var}=")
+        ]
+        assert not uncommented, f"{var} must be commented out in .env.example: {uncommented}"

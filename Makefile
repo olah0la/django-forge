@@ -26,6 +26,9 @@ UV      ?= uv
 export APP_UID := $(shell id -u)
 export APP_GID := $(shell id -g)
 
+# Pinned: a scanner whose rules change under you gives inconsistent results.
+GITLEAKS_IMAGE ?= zricethezav/gitleaks:v8.30.1
+
 COMPOSE ?= docker compose
 SERVICE ?= app
 MANAGE  ?= python manage.py
@@ -104,6 +107,24 @@ test: ## Run the test suite
 	fi
 
 check: lint typecheck test ## Run lint, typecheck and test (local pre-push gate)
+
+audit: ## Security audit — Django deploy checks + secret scan over full git history
+	@printf '\n== Django deploy checks (production layer) ==\n'
+	@# A clean environment with .env loading disabled: the audit must reflect the
+	@# COMMITTED configuration, not whatever the developer happens to have locally.
+	@env -i PATH="$$PATH" HOME=/tmp \
+		DJANGO_SETTINGS_MODULE=config.settings.production \
+		DJANGO_ENV_FILE=/nonexistent \
+		DJANGO_DEBUG=0 \
+		DJANGO_ALLOWED_HOSTS=example.com \
+		DJANGO_SECRET_KEY="$$(.venv/bin/python -c 'import secrets;print(secrets.token_urlsafe(50))')" \
+		.venv/bin/python manage.py check --deploy
+	@printf '\n== Secret scan (gitleaks, FULL git history) ==\n'
+	@# History, not the working tree: a credential deleted in a later commit is
+	@# still present in earlier ones, and still needs rotating.
+	@docker run --rm -v "$$PWD:/repo" -w /repo $(GITLEAKS_IMAGE) git /repo --no-banner
+	@printf '\n'
+
 
 ##@ Docker — available from M2
 
@@ -204,7 +225,7 @@ clean: ## Remove the virtualenv and tool caches (never touches .env or data)
 
 # Every target is phony: none produces a file of its own name. Without this a
 # directory named `build` would silently make `make build` a no-op.
-.PHONY: help install install-prod lock upgrade \
+.PHONY: help install install-prod lock upgrade audit \
         lint format typecheck test check \
         build up down logs ps shell \
         migrate makemigrations django-shell superuser \

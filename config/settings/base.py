@@ -13,6 +13,7 @@ Values marked TODO are knowingly provisional and name the issue that resolves
 them.
 """
 
+import os
 from pathlib import Path
 
 import environ
@@ -39,7 +40,12 @@ env = environ.Env()
 # Load a local .env if one exists. Optional on purpose: a clean checkout must
 # run with no setup (M2-04), and Compose already injects the environment. This
 # is what makes host-side `python manage.py ...` work too.
-_env_file = BASE_DIR / ".env"
+#
+# The path is overridable, and pointing it at a non-existent file disables the
+# load entirely. That is not a hypothetical convenience — the test suite needs
+# it. Without it, tests read whatever .env the developer happens to have, so
+# they pass on one machine and fail on another, and CI disagrees with both.
+_env_file = Path(os.environ.get("DJANGO_ENV_FILE", BASE_DIR / ".env"))
 if _env_file.is_file():
     env.read_env(_env_file)
 
