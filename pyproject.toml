@@ -72,6 +72,16 @@ line-length = 100
 target-version = "py312"
 exclude = [".venv", "migrations"]
 
+[tool.ruff.lint.per-file-ignores]
+# Settings layers use `from .base import *`, which is the conventional Django
+# pattern and the reason a reader only has to follow one hop. Scoped here so
+# the suppression is visible in one place instead of scattered as `noqa`
+# comments, and so star imports stay an error everywhere else.
+"config/settings/*.py" = [
+    "F403",  # star import used
+    "F405",  # name may be undefined, or defined from star import
+]
+
 [tool.ruff.lint]
 # A deliberately modest starting set. Expand it when the CI phase lands, rather
 # than enabling everything at once against a codebase that cannot yet be run.
@@ -95,7 +105,4 @@ exclude = ["migrations/"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# DJANGO_SETTINGS_MODULE cannot be set yet — no settings module exists until
-# M3-02 creates one. Uncomment and point it at the test settings layer then;
-# pointing it at a non-existent module now would fail collection confusingly.
-# DJANGO_SETTINGS_MODULE = "config.settings.test"
+DJANGO_SETTINGS_MODULE = "config.settings.test"

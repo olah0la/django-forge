@@ -26,6 +26,39 @@ recorded in [ADR 0002](adr/0002-project-layout.md).
 | `apps/core/` | Shared abstract models, mixins, common utilities | Feature-specific logic |
 | `docs/` | Architecture notes and ADRs | Anything the code needs at runtime |
 
+## Settings layers
+
+`config/settings/` is a package, not a module. One layer is active at a time, chosen by
+`DJANGO_SETTINGS_MODULE`:
+
+| Module | Used by | Character |
+| --- | --- | --- |
+| `config.settings.base` | nothing directly | Shared configuration only |
+| `config.settings.development` | `make up` | `DEBUG` on, permissive hosts, console email |
+| `config.settings.production` | `make up-prod` | `DEBUG` off and unopenable, hosts from the environment |
+| `config.settings.test` | pytest | In-memory database, fast password hasher |
+
+**Which value wins.** Each environment layer does `from .base import *` and then overrides. That is
+exactly one hop: to answer "where does this setting come from?", look at your layer, then at `base`.
+If a change ever requires a third file to answer that question, the layering has gone wrong.
+
+**What goes where.** If a value is the same everywhere, it belongs in `base`. If it differs, it
+belongs in each layer that needs it — never behind an `if DEBUG:` branch in `base`, which is how a
+development convenience silently reaches production.
+
+**There is no default layer.** `DJANGO_SETTINGS_MODULE` must be set explicitly; running without it
+fails with a message listing the valid modules. This is deliberate — a default means a production
+process with the variable accidentally unset boots on development settings, with debug on. Both
+Compose profiles set it, so containers need no thought.
+
+```bash
+DJANGO_SETTINGS_MODULE=config.settings.development python manage.py check
+```
+
+**Production refuses to enable `DEBUG`.** Setting `DJANGO_DEBUG=1` against the production layer
+raises `ImproperlyConfigured` rather than being quietly ignored, so whoever set it learns why it did
+not take effect.
+
 ## Adding an application
 
 ```bash

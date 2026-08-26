@@ -83,8 +83,7 @@ services:
       # would only create a second, wrong source of truth. Everything else
       # arrives through env_file above.
       DJANGO_DEBUG: "${DJANGO_DEBUG:-1}"
-      # M3-02 splits settings into a package; this value changes then.
-      DJANGO_SETTINGS_MODULE: "${DJANGO_SETTINGS_MODULE:-config.settings}"
+      DJANGO_SETTINGS_MODULE: "${DJANGO_SETTINGS_MODULE:-config.settings.development}"
 
     ports:
       # host:container. Override the host side with APP_PORT when 8000 is taken.
@@ -177,7 +176,7 @@ services:
 
     environment:
       DJANGO_DEBUG: "0"
-      DJANGO_SETTINGS_MODULE: "${DJANGO_SETTINGS_MODULE:-config.settings}"
+      DJANGO_SETTINGS_MODULE: "${DJANGO_SETTINGS_MODULE:-config.settings.production}"
 
     ports:
       # A different host port on purpose, so starting this stack while the

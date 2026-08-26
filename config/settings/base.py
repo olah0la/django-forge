@@ -1,19 +1,25 @@
-"""Django settings for django-forge.
+"""Shared settings — the base every environment layer builds on.
 
-This is deliberately a SINGLE module. **M3-02** splits it into a layered
-package (`config/settings/base.py` plus per-environment overrides); creating
-that structure here would be doing M3-02's work twice.
+**Nothing here may be environment-specific.** If a value differs between
+development and production, it belongs in the layer that needs it, not behind
+an `if DEBUG:` branch here. That rule is what keeps a development-only
+convenience from silently applying in production.
+
+Layers: `development.py`, `production.py`, `test.py` each do
+`from .base import *` and then override explicitly. One hop, so a reader can
+answer "which value wins?" by looking at exactly two files.
 
 Values marked TODO are knowingly provisional and name the issue that resolves
-them. They are flagged rather than left silent, because an unremarked
-development-only default is exactly how an insecure value reaches production.
+them.
 """
 
 import os
 from pathlib import Path
 
-# The repository root: this file is config/settings.py, so two parents up.
-BASE_DIR = Path(__file__).resolve().parent.parent
+# The repository root. This file is config/settings/base.py, so THREE parents
+# up — it moved a level deeper when settings became a package (M3-02). Getting
+# this wrong points STATIC_ROOT and the database at the wrong directory.
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # --------------------------------------------------------------------------
 # Security
@@ -26,14 +32,9 @@ SECRET_KEY = os.environ.get(
     "dev-only-insecure-key-replaced-in-M3-03",
 )
 
-# Note the comparison: environment variables are always strings, so a bare
-# `bool(os.environ.get(...))` would make the string "0" truthy and silently
-# enable debug mode. TODO(M3-03) replaces this with typed parsing.
-DEBUG = os.environ.get("DJANGO_DEBUG", "0") == "1"
-
-# TODO(M3-05): source from the environment and never default permissively.
-# "app" is the Compose service name, which is how the container reaches itself.
-ALLOWED_HOSTS = ["localhost", "127.0.0.1", "app", "0.0.0.0"]
+# DEBUG and ALLOWED_HOSTS are deliberately NOT set here. They differ per
+# environment, and a default in this file would be a default that silently
+# applies in production. Each layer sets them explicitly.
 
 # --------------------------------------------------------------------------
 # Applications

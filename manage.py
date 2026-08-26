@@ -1,12 +1,15 @@
 #!/usr/bin/env python
 """Django's command-line utility for administrative tasks."""
-import os
+
 import sys
+
+from config import require_settings_module
 
 
 def main():
     """Run administrative tasks."""
-    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
+    # No setdefault: an unset variable must fail, not silently pick a layer.
+    require_settings_module()
     try:
         from django.core.management import execute_from_command_line
     except ImportError as exc:

@@ -118,3 +118,5 @@ docker-compose.override.yaml
 Thumbs.db
 ehthumbs.db
 desktop.ini
+
+tools/
