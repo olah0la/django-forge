@@ -84,6 +84,47 @@ explanation.
 anywhere. The cost: it changes on each restart, so logins do not survive a reload. Set
 `DJANGO_SECRET_KEY` in `.env` to pin one.
 
+## ASGI, and what it costs
+
+Both profiles serve `config/asgi.py` through **uvicorn** — development with `--reload`, production
+without. Django's `runserver` is WSGI-only, so using it would have left the ASGI entrypoint
+unexercised until the first async endpoint.
+
+ASGI was chosen because Django Ninja supports async endpoints, and reversing the choice later would
+touch the server, the container, and every endpoint written in between. **Nothing forces a view to
+be async** — the interface only keeps the option open.
+
+### The constraint to know before writing an async view
+
+Django's ORM is **synchronous**. Calling it from an `async def` view raises `SynchronousOnlyOperation`:
+
+```python
+async def bad(request):
+    return JsonResponse({"n": User.objects.count()})
+    # SynchronousOnlyOperation: You cannot call this from an async context
+    #                           - use a thread or sync_to_async.
+```
+
+Use the async ORM methods, or push synchronous work to a thread:
+
+```python
+async def good(request):
+    return JsonResponse({"n": await User.objects.acount()})
+
+from asgiref.sync import sync_to_async
+result = await sync_to_async(some_sync_function)()
+```
+
+Async Django is not "Django but faster". An async view that calls synchronous code without wrapping
+it either raises, or silently blocks the event loop — which is worse, because it looks like it works.
+
+### Static files
+
+`runserver` served static files automatically in `DEBUG`; uvicorn does not. `config/asgi.py` wraps
+the application in `ASGIStaticFilesHandler` **only when `DEBUG` is true**, so the admin stays styled
+in development. Production is deliberately untouched — M6-03 decides how static files are served
+there.
+
 ## Adding an application
 
 ```bash

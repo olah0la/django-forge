@@ -143,20 +143,31 @@ services:
     # machines and in CI, and not on the developer's laptop.
 
     # --- development server --------------------------------------------------
-    # runserver auto-reloads when a source file changes. Combined with the bind
-    # mount from M2-07, an edit on the host restarts the server inside the
-    # container — no rebuild.
+    # uvicorn serves config/asgi.py, so development uses the SAME interface as
+    # production. Django's runserver is WSGI-only, which would have left the
+    # ASGI entrypoint untested until the first async endpoint.
+    #
+    # --reload restarts on a source change; combined with the bind mount from
+    # M2-07, an edit on the host restarts the server — no rebuild.
     #
     # 0.0.0.0 is required: binding to 127.0.0.1 would only accept connections
     # from inside the container, so the published port would appear dead.
     #
-    # TODO(M6-02): this is the DEVELOPMENT server. It is single-threaded and
-    # explicitly not for production; app-prod gets gunicorn there.
+    # TODO(M6-02): --reload is a development feature and must never ship;
+    # app-prod runs uvicorn without it, and M6-02 puts Gunicorn in front.
     command:
-      - python
-      - manage.py
-      - runserver
-      - 0.0.0.0:8000
+      - uvicorn
+      - config.asgi:application
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      # Reload on source changes, using watchfiles across the bind mount from
+      # M2-07. /app holds only project files — the virtualenv lives at
+      # /opt/venv — so the watcher has little to scan.
+      - --reload
+      - --reload-dir
+      - /app
 
   # -------------------------------------------------------------------------
   # app-prod — the production-like stack (opt-in)
@@ -178,6 +189,13 @@ services:
       DJANGO_DEBUG: "0"
       DJANGO_SETTINGS_MODULE: "${DJANGO_SETTINGS_MODULE:-config.settings.production}"
 
+      # Passed through, NOT defaulted: the production layer requires them
+      # (M3-03) and refuses to start without them. Compose interpolates this
+      # file globally, so a `:?` guard here would break every dev command
+      # too — the check lives in the Makefile's up-prod target instead.
+      DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:-}"
+      DJANGO_ALLOWED_HOSTS: "${DJANGO_ALLOWED_HOSTS:-}"
+
     ports:
       # A different host port on purpose, so starting this stack while the
       # development one is up fails on neither port nor patience.
@@ -188,14 +206,21 @@ services:
     # half of that, and 30s matches the default gunicorn graceful timeout.
     stop_grace_period: 30s
 
-    # --- placeholder command, removed by M6-02 -------------------------------
-    # M6-02 replaces this with the real gunicorn invocation.
+    # --- ASGI server (no reload) ---------------------------------------------
+    # The same interface as development, served the way a deployment would:
+    # no --reload, no source mount.
+    #
+    # TODO(M6-02): put Gunicorn in front, managing Uvicorn workers, with
+    # worker count and timeouts from the environment. A single uvicorn process
+    # has no process supervision and no graceful-restart story — fine for
+    # reproducing a production-only problem locally, not for deployment.
     command:
-      - sh
-      - -c
-      - |
-        echo '  app-prod: no production server configured yet — M6-02 delivers it.'
-        exec sleep infinity
+      - uvicorn
+      - config.asgi:application
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
 
 # ---------------------------------------------------------------------------
 # Volumes

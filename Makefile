@@ -4,8 +4,9 @@
 # Run `make` or `make help` to list every target.
 #
 # Targets tagged [M2] or [M3] are defined but not usable yet: they drive files
-# that arrive with those milestones. Running one tells you exactly what is
-# missing and which issue delivers it, rather than leaking a raw tool error.
+# that arrive with those milestones. Targets tagged [local] drive git-ignored
+# tooling that is not part of a clone at all. Either way, running one tells you
+# exactly what is missing, rather than leaking a raw tool error.
 #
 # Variables can be overridden without editing this file:
 #     make up COMPOSE="podman compose"
@@ -31,6 +32,13 @@ MANAGE  ?= python manage.py
 
 COMPOSE_FILE ?= docker-compose.yml
 MANAGE_FILE  ?= manage.py
+
+# The local planning documents, and the tool that projects them onto GitHub.
+# Both are git-ignored and therefore absent from a fresh clone, which is why
+# the targets below check for them the same way the [M2]/[M3] targets do.
+BACKLOG      ?= python -m tools.backlog_sync
+BACKLOG_DIR  ?= tools/backlog_sync
+ISSUES_FILE  ?= issues.local.md
 
 # ---------------------------------------------------------------------------
 # require — stop with an actionable message when a prerequisite is missing
@@ -116,6 +124,23 @@ up: ## [M2] Start the development stack
 
 up-prod: ## [M2] Start the production-like stack
 	@$(call require,$(COMPOSE_FILE),M2-04 (docker-compose.yml))
+	@# The production settings layer requires these (M3-03) and refuses to
+	@# start without them. Checked HERE rather than in docker-compose.yml,
+	@# because Compose interpolates that file for every command — a guard
+	@# there would break `make up`, `make migrate` and `make down` too.
+	@missing=""; \
+	for v in DJANGO_SECRET_KEY DJANGO_ALLOWED_HOSTS; do \
+		val="$${!v-}"; \
+		[ -z "$$val" ] && missing="$$missing $$v"; \
+	done; \
+	if [ -n "$$missing" ]; then \
+		printf '\n  make up-prod needs:%s\n\n' "$$missing"; \
+		printf '    The production settings layer requires them and will not start\n'; \
+		printf '    without them. Put them in .env (see .env.example), or:\n\n'; \
+		printf '      export DJANGO_SECRET_KEY=$$(python -c "from django.core.management.utils import get_random_secret_key as k; print(k())")\n'; \
+		printf '      export DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1\n\n'; \
+		exit 1; \
+	fi
 	$(COMPOSE) --profile prod up -d app-prod
 
 down: ## [M2] Stop every stack, keeping volumes and data
@@ -152,6 +177,23 @@ superuser: ## [M3] Create a Django superuser
 	@$(call require,$(MANAGE_FILE),M3-01 (manage.py))
 	$(COMPOSE) exec $(SERVICE) $(MANAGE) createsuperuser
 
+##@ Backlog — local tooling, not part of a fresh clone
+
+backlog-check: ## [local] Validate the planning documents (no token, no network)
+	@$(call require,$(BACKLOG_DIR),tools/backlog_sync (a local, git-ignored tool))
+	@$(call require,$(ISSUES_FILE),the local planning documents)
+	$(BACKLOG) check
+
+backlog-plan: ## [local] Show what a GitHub sync would change, writing nothing
+	@$(call require,$(BACKLOG_DIR),tools/backlog_sync (a local, git-ignored tool))
+	@$(call require,$(ISSUES_FILE),the local planning documents)
+	$(BACKLOG) plan
+
+backlog-sync: ## [local] Make GitHub match the documents (creates/updates issues)
+	@$(call require,$(BACKLOG_DIR),tools/backlog_sync (a local, git-ignored tool))
+	@$(call require,$(ISSUES_FILE),the local planning documents)
+	$(BACKLOG) apply
+
 ##@ Housekeeping
 
 clean: ## Remove the virtualenv and tool caches (never touches .env or data)
@@ -166,4 +208,5 @@ clean: ## Remove the virtualenv and tool caches (never touches .env or data)
         lint format typecheck test check \
         build up down logs ps shell \
         migrate makemigrations django-shell superuser \
+        backlog-check backlog-plan backlog-sync \
         clean

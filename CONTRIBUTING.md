@@ -34,10 +34,11 @@ make check          # lint, type-check, run tests
 
 That is the whole setup. `make help` lists every available task.
 
-> **What you cannot do yet.** The Docker stack runs, but there is no application in it: the Django
-> project arrives in **M3**, so both services start and then hold themselves open with a message
-> naming the issue that replaces them. Targets tagged `[M3]` in `make help` are defined but will
-> tell you which file is missing and which issue delivers it. That is expected, not a broken setup.
+> **What you cannot do yet.** The stack now serves a Django project — `make up` and open
+> <http://localhost:8000>. What is still missing is everything from **M4** onward: there is no
+> database (settings use SQLite as a placeholder), no API layer, and no production application
+> server. Targets that drive files which do not exist yet tell you which issue delivers them rather
+> than leaking a raw tool error. That is expected, not a broken setup.
 
 ## Hot-reload development loop
 
