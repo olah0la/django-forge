@@ -59,6 +59,31 @@ DJANGO_SETTINGS_MODULE=config.settings.development python manage.py check
 raises `ImproperlyConfigured` rather than being quietly ignored, so whoever set it learns why it did
 not take effect.
 
+## Environment variables
+
+Values are read through a **typed** reader (`env` in `config/settings/base.py`), not raw
+`os.environ`. Environment variables are always strings, and reading them raw produces the classic
+bug: `DJANGO_DEBUG="False"` is a non-empty string and therefore truthy, so debug mode is silently on
+in production.
+
+```python
+env.bool("DJANGO_DEBUG", default=True)      # "False" -> False
+env.list("DJANGO_ALLOWED_HOSTS", default=[])
+require("DJANGO_SECRET_KEY")                # empty or unset -> startup fails
+```
+
+`.env.example` documents every recognised variable. Copy it to `.env` — which is git-ignored — and
+edit. **You do not need one**: the development layer runs with nothing set.
+
+**What is required, and where.** Only the production layer requires anything: `DJANGO_SECRET_KEY`
+and `DJANGO_ALLOWED_HOSTS`. Both use `require()`, which treats an **empty** value as missing —
+`DJANGO_ALLOWED_HOSTS=` would otherwise boot with no allowed hosts and reject every request with no
+explanation.
+
+**Development generates a `SECRET_KEY`** when none is supplied, so no insecure key is committed
+anywhere. The cost: it changes on each restart, so logins do not survive a reload. Set
+`DJANGO_SECRET_KEY` in `.env` to pin one.
+
 ## Adding an application
 
 ```bash

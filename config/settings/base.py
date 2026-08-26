@@ -13,8 +13,10 @@ Values marked TODO are knowingly provisional and name the issue that resolves
 them.
 """
 
-import os
 from pathlib import Path
+
+import environ
+from django.core.exceptions import ImproperlyConfigured
 
 # The repository root. This file is config/settings/base.py, so THREE parents
 # up — it moved a level deeper when settings became a package (M3-02). Getting
@@ -22,15 +24,54 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # --------------------------------------------------------------------------
+# Environment reader
+# --------------------------------------------------------------------------
+# Environment variables are always STRINGS. Reading them raw produces the
+# classic bug: DJANGO_DEBUG="False" is a non-empty string, so a naive
+# `bool(os.environ.get(...))` is True and debug mode is silently on in
+# production — exposing tracebacks, settings and query fragments to anyone who
+# triggers an error.
+#
+# `env` converts and validates instead. Declared types are enforced, and a
+# required variable with no default raises ImproperlyConfigured naming itself.
+env = environ.Env()
+
+# Load a local .env if one exists. Optional on purpose: a clean checkout must
+# run with no setup (M2-04), and Compose already injects the environment. This
+# is what makes host-side `python manage.py ...` work too.
+_env_file = BASE_DIR / ".env"
+if _env_file.is_file():
+    env.read_env(_env_file)
+
+
+def require(name: str) -> str:
+    """Return a required variable's value, treating empty as missing.
+
+    django-environ raises only when a variable is ABSENT. A variable that is
+    present but empty — `DJANGO_ALLOWED_HOSTS=` — passes its check and yields
+    an empty value, which is worse than failing: the application boots
+    misconfigured. Measured before this helper existed: an empty
+    DJANGO_ALLOWED_HOSTS produced `ALLOWED_HOSTS = []`, so every request would
+    have been rejected with no indication why.
+
+    Setting a variable to the empty string is a common deployment slip (an
+    unset template placeholder, a blank CI secret), so it is treated as the
+    mistake it is.
+    """
+    value = env.str(name, default="").strip()
+    if not value:
+        raise ImproperlyConfigured(
+            f"{name} is required but is empty or unset. "
+            "Set it in the environment or in .env — see .env.example."
+        )
+    return value
+
+# --------------------------------------------------------------------------
 # Security
 # --------------------------------------------------------------------------
-# TODO(M3-03): parse this with typed environment handling that fails loudly
-# when it is missing. TODO(M3-05): the fallback below must not survive into
-# the production settings layer.
-SECRET_KEY = os.environ.get(
-    "DJANGO_SECRET_KEY",
-    "dev-only-insecure-key-replaced-in-M3-03",
-)
+# SECRET_KEY is NOT set here. It is required in production and generated in
+# development, so each layer supplies its own — a shared default in this file
+# would be exactly the committed insecure constant this project refuses to ship.
 
 # DEBUG and ALLOWED_HOSTS are deliberately NOT set here. They differ per
 # environment, and a default in this file would be a default that silently
