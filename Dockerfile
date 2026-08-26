@@ -60,11 +60,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-project
 
 # --- application source comes AFTER dependencies -------------------------
-# There is no application yet; it arrives with M3-01. When it does, add:
-#     COPY . .
-#     RUN uv sync --frozen --no-dev
-# Keep those lines below the dependency install, or every source edit will
-# reinstall every package.
+# This ordering is the whole point of the two COPY steps: editing a Python file
+# invalidates only this layer, so the dependency install above stays cached.
+# Moving this above the install would reinstall every package on every edit.
+#
+# What actually lands here is governed by .dockerignore (M2-02) — .git, .venv
+# and caches are excluded, which is what keeps this copy small.
+COPY . .
 
 # ===========================================================================
 # Stage 2 — runtime: only what is needed to serve a request
@@ -91,6 +93,10 @@ WORKDIR /app
 
 # The only thing carried over from the builder.
 COPY --from=builder /opt/venv /opt/venv
+
+# The application itself. Comes from the builder so both stages agree on
+# exactly what was copied.
+COPY --from=builder /app /app
 
 # --- the unprivileged user ------------------------------------------------
 # UID/GID are build arguments so a Compose dev profile can match the host user

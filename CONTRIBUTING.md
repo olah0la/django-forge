@@ -50,6 +50,10 @@ make up          # start the development stack
 # the change is already in the container
 ```
 
+**Where code goes.** `config/` holds project configuration, `apps/` holds applications, and
+`apps/core/` holds shared code. See [docs/layout.md](docs/layout.md) before adding an app — the
+`AppConfig.name` must be the full dotted path (`apps.billing`, not `billing`).
+
 **What is mounted.** The whole project directory, onto `/app`. That includes files you create after
 the container started.
 

@@ -144,6 +144,10 @@ make shell       # a shell inside the app container — `whoami` returns `app`, 
 make down        # stop everything, both profiles
 ```
 
+The Django project now runs: `make up` serves it on <http://localhost:8000>. Where code lives is
+documented in [docs/layout.md](docs/layout.md) — `config/` for project configuration, `apps/` for
+applications, `apps/core/` for shared code.
+
 The development stack **mounts your working copy into the container**, so an edit on your machine
 takes effect immediately with no rebuild. The production-like stack deliberately does not — it runs
 the image exactly as built. See [CONTRIBUTING.md](CONTRIBUTING.md) for the details.

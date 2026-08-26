@@ -83,6 +83,8 @@ services:
       # would only create a second, wrong source of truth. Everything else
       # arrives through env_file above.
       DJANGO_DEBUG: "${DJANGO_DEBUG:-1}"
+      # M3-02 splits settings into a package; this value changes then.
+      DJANGO_SETTINGS_MODULE: "${DJANGO_SETTINGS_MODULE:-config.settings}"
 
     ports:
       # host:container. Override the host side with APP_PORT when 8000 is taken.
@@ -141,19 +143,21 @@ services:
     # too early and fail on its first statement — a race that shows up on slow
     # machines and in CI, and not on the developer's laptop.
 
-    # --- placeholder command, removed by M3-01 -------------------------------
-    # The image's own CMD exits 1, because there is no application in it yet
-    # (see the Dockerfile). A container that exits immediately cannot be
-    # `exec`-ed into, which would make the stack impossible to inspect. This
-    # keeps it alive and says why. M3-01 replaces it with the Django
-    # development server, and M2-07 makes that server auto-reload.
+    # --- development server --------------------------------------------------
+    # runserver auto-reloads when a source file changes. Combined with the bind
+    # mount from M2-07, an edit on the host restarts the server inside the
+    # container — no rebuild.
+    #
+    # 0.0.0.0 is required: binding to 127.0.0.1 would only accept connections
+    # from inside the container, so the published port would appear dead.
+    #
+    # TODO(M6-02): this is the DEVELOPMENT server. It is single-threaded and
+    # explicitly not for production; app-prod gets gunicorn there.
     command:
-      - sh
-      - -c
-      - |
-        echo '  app (development): no Django project in this image yet — M3-01 delivers it.'
-        echo '  The container is held open so you can inspect it: docker compose exec app bash'
-        exec sleep infinity
+      - python
+      - manage.py
+      - runserver
+      - 0.0.0.0:8000
 
   # -------------------------------------------------------------------------
   # app-prod — the production-like stack (opt-in)
@@ -173,6 +177,7 @@ services:
 
     environment:
       DJANGO_DEBUG: "0"
+      DJANGO_SETTINGS_MODULE: "${DJANGO_SETTINGS_MODULE:-config.settings}"
 
     ports:
       # A different host port on purpose, so starting this stack while the
