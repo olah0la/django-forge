@@ -50,6 +50,11 @@ def load_settings():
                 # so the same commit passes on one machine and fails on
                 # another — which is exactly what happened before this line.
                 "DJANGO_ENV_FILE": "/nonexistent/.env",
+                # base.py requires DATABASE_URL with no fallback (M4-02). This
+                # is a dummy: nothing here connects, and the test layer
+                # overrides DATABASES with in-memory SQLite anyway. A test that
+                # needs a specific value passes its own, which wins via **env.
+                "DATABASE_URL": "postgresql://forge:forge@db:5432/forge",
                 **env,
             },
         )

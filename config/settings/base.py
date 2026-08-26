@@ -145,16 +145,80 @@ ASGI_APPLICATION = "config.asgi.application"
 # --------------------------------------------------------------------------
 # Database
 # --------------------------------------------------------------------------
-# TODO(M4-01/M4-02): PostgreSQL is the real target. SQLite is a placeholder so
-# the project runs before the database service exists — it is NOT the intended
-# engine, and developing against it hides transaction and constraint
-# differences that then surface only in production.
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
-    }
-}
+# DATABASES is NOT set here. The development and production layers build it
+# from DATABASE_URL via database_from_url() below; the test layer defines its
+# own in-memory SQLite and never needs a URL.
+#
+# Requiring it in base would force a database URL on a test suite that does not
+# use one — and pytest-django imports settings during startup, so it would fail
+# before a single test ran.
+
+
+def database_from_url() -> dict:
+    """Build Django's DATABASES["default"] from DATABASE_URL.
+
+    One connection URL rather than five separate variables: most deployment
+    platforms hand you a URL, and five variables are five chances to configure
+    a partially-wrong database. The URL embeds the password, so it must never
+    be logged.
+
+    REQUIRED, with no fallback. Falling back to SQLite would let host-side
+    commands run against a DIFFERENT ENGINE than the container, silently — the
+    local-vs-production divergence PostgreSQL was adopted to remove,
+    reintroduced through the back door.
+    """
+    if not env.str("DATABASE_URL", default="").strip():
+        raise ImproperlyConfigured(
+            "DATABASE_URL is not set.\n\n"
+            "  There is deliberately no fallback: defaulting to SQLite would run\n"
+            "  your commands against a different database engine than the\n"
+            "  container uses, without saying so.\n\n"
+            "  Django commands run inside the container, where Compose supplies it:\n"
+            "      make migrate          apply migrations\n"
+            "      make django-shell     Django REPL\n"
+            "      make db-shell         psql session\n"
+            "      make shell            a shell in the app container\n\n"
+            "  To run against the database from the host, publish its port with a\n"
+            "  docker-compose.override.yml and set DATABASE_URL in .env — see\n"
+            "  .env.example."
+        )
+
+    config = env.db_url("DATABASE_URL")
+
+    # ⚠️  THE ARITHMETIC THAT MATTERS
+    #
+    #     total connections ≈ workers × THREADS PER WORKER
+    #
+    # Not workers alone. Under ASGI, sync views run in a threadpool and Django
+    # connections are THREAD-LOCAL, so each busy thread holds its own. Measured
+    # on this stack with CONN_MAX_AGE=60: 20 concurrent requests to a single
+    # uvicorn process held 20 connections, against a max_connections of 100.
+    #
+    # Django's default is a new connection per request, closed at the end:
+    # always correct, and wasteful — establishing a PostgreSQL connection costs
+    # a round trip plus authentication, every request.
+    #
+    # CONN_MAX_AGE reuses one instead. But connections are held PER WORKER.
+    # PostgreSQL's default max_connections is 100, and exceeding it refuses new
+    # connections outright — the most common way a well-intentioned worker
+    # increase causes an outage. At scale the answer is PgBouncer, NOT a larger
+    # max_connections: each connection costs memory server-side.
+    #
+    # 60s is a deliberate middle: long enough that the per-request cost
+    # disappears, short enough that idle connections are not held for minutes
+    # per worker. See docs/layout.md.
+    config["CONN_MAX_AGE"] = env.int("DJANGO_CONN_MAX_AGE", default=60)
+
+    # A pooled connection can be killed by a database restart or a network
+    # blip. Without this, the next request to reuse the dead connection fails
+    # with an InterfaceError that has no obvious cause; Django instead runs a
+    # cheap liveness check and replaces it.
+    #
+    # This failure mode exists BECAUSE CONN_MAX_AGE > 0, so the two ship together.
+    config["CONN_HEALTH_CHECKS"] = config["CONN_MAX_AGE"] > 0
+
+    return config
+
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},

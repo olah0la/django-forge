@@ -117,6 +117,7 @@ audit: ## Security audit — Django deploy checks + secret scan over full git hi
 		DJANGO_ENV_FILE=/nonexistent \
 		DJANGO_DEBUG=0 \
 		DJANGO_ALLOWED_HOSTS=example.com \
+		DATABASE_URL=postgresql://audit:audit@localhost:5432/audit \
 		DJANGO_SECRET_KEY="$$(.venv/bin/python -c 'import secrets;print(secrets.token_urlsafe(50))')" \
 		.venv/bin/python manage.py check --deploy
 	@printf '\n== Secret scan (gitleaks, FULL git history) ==\n'

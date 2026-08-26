@@ -3,6 +3,10 @@
 Selected by pyproject.toml's pytest configuration.
 """
 
+# NOTE: importing base requires DATABASE_URL, because the base layer has no
+# fallback on purpose. conftest.py supplies a dummy value; the DATABASES
+# override below then replaces it entirely, so nothing here ever connects to
+# PostgreSQL.
 from .base import *  # noqa: F403
 
 DEBUG = False

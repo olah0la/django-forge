@@ -6,7 +6,7 @@ Selected only by DJANGO_SETTINGS_MODULE=config.settings.production.
 from django.core.exceptions import ImproperlyConfigured
 
 from .base import *  # noqa: F403
-from .base import env, require
+from .base import database_from_url, env, require
 
 # --------------------------------------------------------------------------
 # DEBUG is off, and cannot be turned on
@@ -125,3 +125,7 @@ CSRF_TRUSTED_ORIGINS = env.list("DJANGO_CSRF_TRUSTED_ORIGINS", default=[])
 SILENCED_SYSTEM_CHECKS: list[str] = [
     "security.W021",
 ]
+
+# PostgreSQL, from DATABASE_URL. See database_from_url() for the connection
+# reuse settings and the worker-count arithmetic that bounds them.
+DATABASES = {"default": database_from_url()}

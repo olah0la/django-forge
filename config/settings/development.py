@@ -7,7 +7,7 @@ only by DJANGO_SETTINGS_MODULE=config.settings.development.
 from django.core.management.utils import get_random_secret_key
 
 from .base import *  # noqa: F403
-from .base import env
+from .base import database_from_url, env
 
 # Typed, so the literal string "False" becomes False rather than a truthy
 # non-empty string. Defaults to on: this layer is never deployed.
@@ -28,3 +28,7 @@ ALLOWED_HOSTS = env.list(
 # Email goes to the console rather than anywhere real, so a stray send during
 # development cannot reach an actual person.
 EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+
+# PostgreSQL, from DATABASE_URL. See database_from_url() for the connection
+# reuse settings and the worker-count arithmetic that bounds them.
+DATABASES = {"default": database_from_url()}
