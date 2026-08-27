@@ -334,3 +334,85 @@ def test_database_port_is_not_published():
     compose = _compose()
     db_block = compose[compose.index("  db:") : compose.index("  # ----", compose.index("  db:"))]
     assert "5432:5432" not in db_block
+
+
+# ---------------------------------------------------------------------------
+# Database connection and reuse (M4-02)
+# ---------------------------------------------------------------------------
+DB_URL = "postgresql://forge:secret@db:5432/forge"
+
+
+def test_missing_database_url_fails_with_guidance(load_settings):
+    """No fallback, on purpose.
+
+    Falling back to SQLite would run host-side commands against a different
+    engine than the container, silently — the local-vs-production divergence
+    PostgreSQL was adopted to remove.
+    """
+    rc, _, err = load_settings("development", {"DATABASE_URL": ""})
+    assert rc != 0, "development started without DATABASE_URL"
+    assert "DATABASE_URL is not set" in err
+    assert "make migrate" in err, "the error must say how to run Django commands here"
+
+
+def test_database_url_is_parsed_into_postgres(load_settings):
+    rc, out, err = load_settings(
+        "development",
+        {"DATABASE_URL": DB_URL},
+        "{'engine': settings.DATABASES['default']['ENGINE'],"
+        " 'host': settings.DATABASES['default']['HOST'],"
+        " 'name': settings.DATABASES['default']['NAME']}",
+    )
+    assert rc == 0, err
+    cfg = json.loads(out)
+    assert cfg["engine"] == "django.db.backends.postgresql"
+    assert cfg["host"] == "db"
+    assert cfg["name"] == "forge"
+
+
+def test_conn_max_age_defaults_to_sixty(load_settings):
+    rc, out, err = load_settings(
+        "development", {"DATABASE_URL": DB_URL},
+        "{'v': settings.DATABASES['default']['CONN_MAX_AGE']}",
+    )
+    assert rc == 0, err
+    assert json.loads(out)["v"] == 60
+
+
+def test_conn_max_age_is_overridable(load_settings):
+    rc, out, err = load_settings(
+        "development", {"DATABASE_URL": DB_URL, "DJANGO_CONN_MAX_AGE": "0"},
+        "{'v': settings.DATABASES['default']['CONN_MAX_AGE']}",
+    )
+    assert rc == 0, err
+    assert json.loads(out)["v"] == 0
+
+
+@pytest.mark.parametrize(("max_age", "expected"), [("60", True), ("0", False)])
+def test_health_checks_follow_conn_max_age(load_settings, max_age, expected):
+    """A pooled connection can be killed by a database restart; without a health
+    check the next request to reuse it fails with an unexplained InterfaceError.
+    The failure mode exists only when CONN_MAX_AGE > 0, so the settings pair."""
+    rc, out, err = load_settings(
+        "development", {"DATABASE_URL": DB_URL, "DJANGO_CONN_MAX_AGE": max_age},
+        "{'v': settings.DATABASES['default']['CONN_HEALTH_CHECKS']}",
+    )
+    assert rc == 0, err
+    assert json.loads(out)["v"] is expected
+
+
+def test_production_also_requires_database_url(load_settings):
+    rc, _, err = load_settings("production", {**PROD_ENV, "DATABASE_URL": ""})
+    assert rc != 0
+    assert "DATABASE_URL is not set" in err
+
+
+def test_test_layer_needs_no_database_url():
+    """The test layer defines its own in-memory SQLite.
+
+    Requiring a URL in base would force one on a suite that never connects —
+    and pytest-django imports settings at startup, so it would fail before a
+    single test ran.
+    """
+    assert settings.DATABASES["default"]["NAME"] == ":memory:"
+    assert "sqlite3" in settings.DATABASES["default"]["ENGINE"]

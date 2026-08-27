@@ -197,6 +197,18 @@ makemigrations: ## [M3] Generate migrations from model changes
 	@$(call require,$(MANAGE_FILE),M3-01 (manage.py))
 	$(COMPOSE) exec $(SERVICE) $(MANAGE) makemigrations
 
+migrations-check: ## [M4] Fail if a model change has no migration (pre-push)
+	@$(call require,$(MANAGE_FILE),M3-01 (manage.py))
+	@# Catches the classic "works locally, fails on deploy": a model edited
+	@# without running makemigrations. --check sets a non-zero exit status when
+	@# a migration is missing; --dry-run guarantees nothing is written, so this
+	@# is safe to run anywhere.
+	@#
+	@# Deliberately NOT part of `make check`. That target runs on the host,
+	@# this one needs the container, so folding it in would make the pre-push
+	@# gate fail whenever the stack happens to be down.
+	$(COMPOSE) exec $(SERVICE) $(MANAGE) makemigrations --check --dry-run
+
 django-shell: ## [M3] Open the Django REPL
 	@$(call require,$(MANAGE_FILE),M3-01 (manage.py))
 	$(COMPOSE) exec $(SERVICE) $(MANAGE) shell
@@ -235,6 +247,6 @@ clean: ## Remove the virtualenv and tool caches (never touches .env or data)
 .PHONY: help install install-prod lock upgrade audit \
         lint format typecheck test check \
         build up down logs ps shell \
-        migrate makemigrations django-shell superuser db-shell \
+        migrate makemigrations migrations-check django-shell superuser db-shell \
         backlog-check backlog-plan backlog-sync \
         clean

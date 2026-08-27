@@ -113,11 +113,13 @@ fi
 #   * A long migration blocks startup past the platform's health timeout, so
 #     the container is killed mid-migration and restarted — repeatedly.
 #
-# M4-03 owns the migration workflow and decides how they are applied. Until
-# then run them explicitly:  make migrate
+# They are run as a deliberate step instead: `make migrate` locally, and a
+# release job or one-off task in a deployment. The full workflow, including the
+# operations that cause outages, is in docs/migrations.md.
 #
-# TODO(M4-03): if migrations ever run here, gate them behind an opt-in
-# variable and ensure only one replica can run them at a time.
+# If a derived project does decide to migrate here, two conditions are not
+# optional: gate it behind an opt-in variable, and ensure only ONE replica can
+# run it at a time (an advisory lock, or a separate init container/job).
 
 # ---------------------------------------------------------------------------
 # 4. Hand off to the application

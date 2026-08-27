@@ -200,9 +200,54 @@ services:
 The difference is one flag. `make down` never passes `-v`, so the destructive form has to be typed
 deliberately.
 
-**Django does not use PostgreSQL yet.** Settings still point at SQLite; **M4-02** wires them to
-`DATABASE_URL`. The entrypoint already waits for the database to accept queries before the
-application starts.
+### Connecting to it
+
+Django reads a single `DATABASE_URL` rather than five separate variables: most platforms hand you a
+URL, and five variables are five chances to configure a partially-wrong database.
+
+**It is required, with no fallback.** Falling back to SQLite would let host-side commands run
+against a different engine than the container — silently. Django commands therefore run through the
+container: `make migrate`, `make django-shell`, `make db-shell`. Running `manage.py` directly on the
+host fails with a message saying exactly that.
+
+### Connection reuse, and the arithmetic that bounds it
+
+`CONN_MAX_AGE` (default **60s**) keeps a connection open for reuse instead of opening one per
+request. `CONN_HEALTH_CHECKS` turns on with it: a pooled connection can be killed by a database
+restart, and without a check the next request to reuse it fails with an unexplained `InterfaceError`.
+
+> **total connections ≈ workers × threads per worker**
+
+Not workers alone — this is the part that surprises people. Under ASGI, sync views run in a
+threadpool and Django connections are **thread-local**, so every busy thread holds its own.
+
+Measured on this stack, one uvicorn process, `CONN_MAX_AGE=60`:
+
+| Load | Connections held |
+| --- | --- |
+| 40 sequential requests | 9 |
+| 20 concurrent requests | **20** |
+
+PostgreSQL's default `max_connections` is **100**. So a modest 4 workers × 16 threads is 64
+connections before any other client connects — and exceeding the limit refuses new connections
+outright, which is the most common way a worker-count increase causes an outage.
+
+Levers, in order of preference:
+
+1. Lower `DJANGO_CONN_MAX_AGE` — idle connections are released sooner.
+2. Cap the threadpool (`ASGI_THREADS`) and worker count together (**M6-02** sets these).
+3. **PgBouncer**, at scale. Not a larger `max_connections`: each connection costs memory
+   server-side, so raising the limit moves the failure rather than removing it.
+
+### Migrations
+
+Generating, reviewing and applying them — and the operations that turn a schema change into an
+outage — are covered in **[migrations.md](migrations.md)**. The short version reviewers use in a
+pull request is the [checklist](../CONTRIBUTING.md#migration-review-checklist) in `CONTRIBUTING.md`.
+
+Migrations are deliberately **not** run at container startup: during a rolling deploy every replica
+would race to apply the same migration, and a long one blocks startup past the health timeout. Run
+them explicitly with `make migrate`, and check for drift with `make migrations-check`.
 
 ## Adding an application
 

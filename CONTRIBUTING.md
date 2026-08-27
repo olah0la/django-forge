@@ -34,11 +34,11 @@ make check          # lint, type-check, run tests
 
 That is the whole setup. `make help` lists every available task.
 
-> **What you cannot do yet.** The stack now serves a Django project — `make up` and open
-> <http://localhost:8000>. What is still missing is everything from **M4** onward: there is no
-> database (settings use SQLite as a placeholder), no API layer, and no production application
-> server. Targets that drive files which do not exist yet tell you which issue delivers them rather
-> than leaking a raw tool error. That is expected, not a broken setup.
+> **What you cannot do yet.** The stack serves a Django project backed by PostgreSQL — `make up`,
+> `make migrate`, and open <http://localhost:8000>. What is still missing is **M5** onward: there
+> are no models yet (M4-04), no API layer, and no production application server. Targets that drive
+> files which do not exist yet tell you which issue delivers them rather than leaking a raw tool
+> error. That is expected, not a broken setup.
 
 ## Hot-reload development loop
 
@@ -163,6 +163,47 @@ description:
 Reviewers ask questions to understand, not to challenge. If a comment reads as blunt, assume it is
 brevity rather than criticism — and if a review comment is unclear, ask.
 
+## Migration review checklist
+
+Migrations get their own checklist because they are the most common cause of serious production
+incidents in Django projects, and because the danger is invisible locally: an operation that returns
+instantly against fifty development rows can lock a fifty-million-row production table for minutes.
+
+Work through this on any PR that adds or changes a file under `*/migrations/`. The reasoning behind
+every line, with worked examples, is in [docs/migrations.md](docs/migrations.md).
+
+**Before requesting review**
+
+- [ ] `make migrations-check` passes — no model change is missing a migration
+- [ ] The migration was **read**, not just generated. A migration is code and is reviewed as code
+- [ ] Django chose the operation you meant — in particular, a `RenameField` is a rename and not a
+      drop-plus-add of the same data
+- [ ] `make migrate` was run, then run **again**, and the second run reported `No migrations to apply.`
+
+**The four that cause outages** — if the PR does any of these, say so in the description and say why
+it is safe:
+
+- [ ] **Adding a non-nullable column without a constant default.** A computed default (`now()`, a
+      UUID) rewrites every row under an exclusive lock. Add the column nullable, backfill, then add
+      the constraint `NOT VALID` and `VALIDATE` it — across separate deploys
+- [ ] **Adding an index without `CONCURRENTLY`.** A plain `AddIndex` blocks writes for the whole
+      build. Use `AddIndexConcurrently` with `atomic = False` on the migration — without that flag it
+      does not run at all
+- [ ] **Renaming or dropping a column in a single deploy.** During a rolling deploy old and new code
+      run against one schema, so one half breaks. Use add → backfill → switch reads → drop, over four
+      deploys
+- [ ] **A data migration that loads the whole table.** `Model.objects.all()` materialises every row.
+      Batch with `.iterator()` or pk ranges, use `apps.get_model()` rather than importing the model,
+      and give `RunPython` a reverse
+
+**Other things a reviewer catches**
+
+- [ ] No applied migration was edited in place — changes are additive, in a new migration
+- [ ] A branched history was resolved with a merge migration whose branch summary was checked for
+      *semantic* conflicts, not only ordering
+- [ ] A non-atomic migration (`atomic = False`) does one thing, since it cannot roll back
+- [ ] Any squash keeps the originals in place for one release before they are deleted
+
 ## Definition of Done
 
 Every task inherits this checklist. Confirm each item before asking for review.
@@ -188,7 +229,5 @@ implementation to describe yet.
 
 | Section to come | Added by |
 | --- | --- |
-| Hot-reload development workflow | **M2-07** |
-| Migration review checklist | **M4-03** |
 | API schema and review expectations | **M5-03** |
 | How to add an ADR | **M7-03** |

@@ -8,23 +8,22 @@ the start of every project.
 
 ---
 
-## 🚧 Project status: pre-implementation
+## 🚧 Project status: in progress
 
-> **This repository does not contain a working application yet.**
+> **The stack runs; the application layer is still being built.**
 >
-> There is no Django project yet. What exists today is a governed repository with locked
-> dependencies (**M1**), and a multi-stage `Dockerfile` that builds a runtime image — one with no
-> application inside it to run (**M2**, in progress). The rest is still the
-> plan: a seven-milestone roadmap and a backlog of 40 issues, tracked in
-> [GitHub Milestones](https://github.com/olah0la/django-forge/milestones) and
+> `make up` starts Django on <http://localhost:8000>, backed by PostgreSQL. What exists today is a
+> governed repository with locked dependencies (**M1**), a containerized stack with two profiles
+> (**M2**), a Django project with layered 12-factor settings (**M3**), and the persistence layer
+> (**M4**, in progress). Still ahead: the API layer (**M5**), operational readiness (**M6**), and
+> the template tooling that makes this consumable as a starting point (**M7**) — a backlog of 40
+> issues tracked in [GitHub Milestones](https://github.com/olah0la/django-forge/milestones) and
 > [Issues](https://github.com/olah0la/django-forge/issues).
 >
-> Everything below describing setup and usage is **planned**, not available. It is documented now
-> so the target is unambiguous while it is being built. Sections that do not work yet are marked
-> 🔜.
+> Sections describing work that has not landed are marked 🔜.
 
-Work begins at **M1 — Foundation & Developer Environment**. If you are looking for a first task,
-see [Your first contribution](#-your-first-contribution).
+If you are looking for a first task, see
+[Your first contribution](#-your-first-contribution).
 
 ---
 
@@ -73,9 +72,9 @@ the ones before it, so reordering them creates rework.
 | # | Milestone | Goal | Status |
 | --- | --- | --- | --- |
 | **M1** | Foundation & Developer Environment | A reproducible, well-governed repository | ✅ Complete |
-| **M2** | Containerization | The project builds and runs in Docker, identically for everyone | 🚧 In progress |
-| **M3** | Django Project Scaffold & Configuration | A Django project with 12-factor configuration | 🔜 Not started |
-| **M4** | Persistence Layer | PostgreSQL, migrations, and shared model foundations | 🔜 Not started |
+| **M2** | Containerization | The project builds and runs in Docker, identically for everyone | ✅ Complete |
+| **M3** | Django Project Scaffold & Configuration | A Django project with 12-factor configuration | ✅ Complete |
+| **M4** | Persistence Layer | PostgreSQL, migrations, and shared model foundations | 🚧 In progress |
 | **M5** | API Layer (Django Ninja) | A versioned, documented, consistently-erroring HTTP API | 🔜 Not started |
 | **M6** | Operational Readiness | The service is safe to run under a process manager or orchestrator | 🔜 Not started |
 | **M7** | Template Consumability | The repository can actually be used as a starting point | 🔜 Not started |
@@ -148,16 +147,31 @@ The Django project now runs: `make up` serves it on <http://localhost:8000>. Whe
 documented in [docs/layout.md](docs/layout.md) — `config/` for project configuration, `apps/` for
 applications, `apps/core/` for shared code.
 
+**PostgreSQL 17.6 is the database in development as well as production** (M4-01, M4-02), so local
+behaviour matches deployed behaviour rather than diverging through SQLite:
+
+```bash
+make migrate            # apply migrations
+make makemigrations     # generate them from model changes
+make migrations-check   # fail if a model change has no migration — run before pushing
+make db-shell           # a psql session against the development database
+```
+
+Migrations are deliberately **not** applied at container startup — during a rolling deploy every
+replica would race to apply the same one. [docs/migrations.md](docs/migrations.md) covers the
+workflow, the branch-conflict procedure, and the operations that turn a schema change into an
+outage; the [review checklist](CONTRIBUTING.md#migration-review-checklist) is the short form.
+
 The development stack **mounts your working copy into the container**, so an edit on your machine
 takes effect immediately with no rebuild. The production-like stack deliberately does not — it runs
 the image exactly as built. See [CONTRIBUTING.md](CONTRIBUTING.md) for the details.
 
-Both containers report a **health status**, so `make ps` shows `Up 20 seconds (healthy)` rather
-than just `Up`. Today the check proves the container's runtime is intact — the interpreter and the
-installed virtualenv work. It does *not* yet prove the application can serve traffic, because there
-is no application: **M6-01** replaces the probe with a request to the readiness endpoint. The value
-of having it now is that **M4-01** can gate PostgreSQL startup on `condition: service_healthy`
-instead of a bare dependency.
+Every container reports a **health status**, so `make ps` shows `Up 20 seconds (healthy)` rather
+than just `Up`. The database's check confirms it accepts connections, and the app waits on that
+`condition: service_healthy` rather than a bare dependency — which removes a whole class of
+intermittent startup failures. The app's own check proves its runtime is intact; it does *not* yet
+prove it can serve traffic, because **M6-01** replaces the probe with a request to the readiness
+endpoint.
 
 Development is the default profile, so a bare `docker compose up` starts it with no flag. The
 production-like profile is opt-in and must name its service:
@@ -168,13 +182,12 @@ deployment would, which is what makes a production-only problem reproducible loc
 > before building. A bind mount keeps the host's numeric owner, so a container user with a
 > different UID cannot write the files it mounted — this bites on Linux and not on macOS.
 
-There is no application inside the container yet, so both services hold themselves open with a
-message pointing at the issue that replaces them (M3-01 for the Django development server, M6-02
-for gunicorn). The stack is real; the thing it will serve is not there yet.
+The development stack runs Django under uvicorn with auto-reload; the production-like one runs
+the same image the way a deployment would. **M6-02** still owns putting gunicorn in front of it.
 
-Targets tagged `[M3]` are listed but not usable — running one tells you which file is missing and
-which issue delivers it, rather than failing with a raw error. The underlying commands are plain
-`uv`:
+Targets tagged for milestones that have not landed are listed but not usable — running one tells you
+which file is missing and which issue delivers it, rather than failing with a raw error. The
+underlying commands are plain `uv`:
 
 ```bash
 uv sync                      # what `make install` runs
@@ -185,8 +198,6 @@ uv lock                      # re-resolve after editing dependencies in pyprojec
 `uv` reads the pinned interpreter from `.python-version` and provisions Python 3.12 itself, so no
 local Python installation is needed. **`uv.lock` is committed and must never be edited by hand** —
 it is what makes every install resolve to identical versions.
-
-The Django project itself arrives in M3 — until then the container starts, but serves nothing.
 
 ---
 
