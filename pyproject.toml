@@ -103,6 +103,23 @@ warn_redundant_casts = true
 ignore_missing_imports = true
 exclude = ["migrations/"]
 
+# django-stubs has been a dependency since M1-02 but its PLUGIN was never
+# enabled, so it did nothing for model code. Without it mypy cannot infer what
+# a field descriptor returns and demands an annotation on every single one:
+#
+#     id = models.UUIDField(...)   ->  error: Need type annotation for "id"
+#
+# The alternative was annotating every field by hand, which is noise Django
+# projects do not write. Enabled with the first models (M4-04).
+plugins = ["mypy_django_plugin.main"]
+
+[tool.django-stubs]
+# The plugin imports settings to resolve model metadata. The test layer is the
+# right choice: it is the only one that needs no real infrastructure. It still
+# imports base, which requires DATABASE_URL with no fallback, so the Makefile's
+# typecheck target supplies a dummy — the same approach `make audit` uses.
+django_settings_module = "config.settings.test"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 DJANGO_SETTINGS_MODULE = "config.settings.test"

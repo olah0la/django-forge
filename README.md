@@ -14,8 +14,8 @@ the start of every project.
 >
 > `make up` starts Django on <http://localhost:8000>, backed by PostgreSQL. What exists today is a
 > governed repository with locked dependencies (**M1**), a containerized stack with two profiles
-> (**M2**), a Django project with layered 12-factor settings (**M3**), and the persistence layer
-> (**M4**, in progress). Still ahead: the API layer (**M5**), operational readiness (**M6**), and
+> (**M2**), a Django project with layered 12-factor settings (**M3**), and the persistence layer —
+> PostgreSQL, a migration workflow, and shared base models (**M4**, in progress). Still ahead: the API layer (**M5**), operational readiness (**M6**), and
 > the template tooling that makes this consumable as a starting point (**M7**) — a backlog of 40
 > issues tracked in [GitHub Milestones](https://github.com/olah0la/django-forge/milestones) and
 > [Issues](https://github.com/olah0la/django-forge/issues).
@@ -155,7 +155,24 @@ make migrate            # apply migrations
 make makemigrations     # generate them from model changes
 make migrations-check   # fail if a model change has no migration — run before pushing
 make db-shell           # a psql session against the development database
+make test-db            # run the test suite against real PostgreSQL, in the container
 ```
+
+**Shared abstract base models** (M4-04) give every model a UUIDv7 primary key and automatic
+created/updated timestamps:
+
+```python
+from apps.core.models import BaseModel
+
+class Invoice(BaseModel):        # gets id, created_at, updated_at
+    reference = models.CharField(max_length=32, unique=True)
+```
+
+UUIDv7 rather than a sequential integer because an integer in a URL leaks how many records exist and
+invites enumeration; v7 rather than v4 because its timestamp prefix keeps inserts clustered in the
+index — measured at 3 index pages read against 1,157 for the same workload.
+[docs/models.md](docs/models.md) has the numbers, the costs, and the soft-deletion pattern that is
+deliberately documented rather than shipped.
 
 Migrations are deliberately **not** applied at container startup — during a rolling deploy every
 replica would race to apply the same one. [docs/migrations.md](docs/migrations.md) covers the

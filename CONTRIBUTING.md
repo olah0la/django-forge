@@ -67,6 +67,12 @@ make build       # reinstall them in the image
 make up
 ```
 
+**The development image carries test tooling; the production one does not.** `app` builds the
+Dockerfile's `dev` stage (runtime plus ruff, mypy and pytest) so `make test-db` can run the suite
+inside the network against the real database — its port is deliberately not published, so the host
+cannot reach it. `app-prod` builds `runtime`, which has no test tooling at all. If you add a
+development dependency, `make lock && make build` as above.
+
 **The production-like stack is deliberately not mounted.** `make up-prod` runs the image exactly as
 built, which is what makes it a faithful stand-in for a deployment. If you change a file and it does
 not take effect there, that is correct behaviour, not a bug.

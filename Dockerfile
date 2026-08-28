@@ -69,6 +69,20 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 COPY . .
 
 # ===========================================================================
+# Stage 1b — builder-dev: the same install, plus development tooling
+# ===========================================================================
+# Identical to `builder` except for the missing --no-dev, so ruff, mypy and
+# pytest land in the venv. Kept as its own stage so `runtime` can never
+# accidentally pick it up: production images must not ship test tooling.
+#
+# It builds on `builder`, so the expensive resolve above is reused rather than
+# repeated — this adds the dev packages, it does not reinstall the runtime ones.
+FROM builder AS builder-dev
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-install-project
+
+# ===========================================================================
 # Stage 2 — runtime: only what is needed to serve a request
 # ===========================================================================
 # A fresh copy of the same base image. It inherits nothing from the builder,
@@ -174,3 +188,27 @@ echo '    The Python environment IS installed — inspect it with:'; \
 echo '      docker run --rm -it <image> python'; \
 echo; \
 exit 1"]
+
+# ===========================================================================
+# Stage 3 — dev: runtime plus the tooling needed to test against PostgreSQL
+# ===========================================================================
+# What the development Compose service builds (`target: dev`). It is `runtime`
+# with the development virtualenv swapped in, so the two profiles still share
+# every other property — user, entrypoint, health check, layout — and cannot
+# drift apart.
+#
+# WHY THIS EXISTS. The test suite has to be runnable against real PostgreSQL,
+# and the database port is deliberately not published (M4-01), so the tests
+# have to run *inside* the network. That needs pytest in the image, and pytest
+# must never be in `runtime`.
+#
+# `runtime` is untouched by this stage. Verify that with:
+#     docker compose run --rm app-prod python -m pytest    # must fail
+FROM runtime AS dev
+
+# Copied as root-owned and merely readable by `app`, exactly as the runtime
+# venv is: the application user must not be able to rewrite its own
+# dependencies. --chown is therefore deliberately absent.
+COPY --from=builder-dev /opt/venv /opt/venv
+
+USER app

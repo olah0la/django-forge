@@ -270,6 +270,15 @@ Then two steps that are easy to forget:
 
 2. Add it to `LOCAL_APPS` in the settings module.
 
+## Models
+
+Shared abstract base models live in `apps/core/models.py`: a UUIDv7 primary key and automatic
+created/updated timestamps, which most models in a derived project should inherit via `BaseModel`.
+
+**[models.md](models.md)** covers the worked example, the measured reasoning behind the primary-key
+choice, the timestamp write that silently skips `updated_at`, and the soft-deletion pattern — which
+is documented deliberately rather than shipped.
+
 ## Why `apps/core/` is an app, not a plain package
 
 It could have been a loose `shared/` package, but shared code here will include **abstract base

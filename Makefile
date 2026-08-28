@@ -92,9 +92,15 @@ format: ## Format with ruff
 	$(UV) run ruff format .
 
 typecheck: ## Type-check with mypy
+	@# The django-stubs plugin (pyproject.toml) imports Django settings to
+	@# resolve model fields, and base.py requires DATABASE_URL with no
+	@# fallback. A clean checkout has no .env, so a dummy is supplied rather
+	@# than have type-checking fail on a correctly set-up machine. Nothing
+	@# connects. `make audit` uses the same approach.
 	@if [ -z "$$(find . -name '*.py' -not -path './.venv/*' -not -path './.git/*' -print -quit)" ]; then \
 		printf '  Nothing to type-check: no Python source yet (arrives with M3-01).\n'; \
 	else \
+		DATABASE_URL="$${DATABASE_URL:-postgresql://mypy:mypy@localhost:5432/mypy}" \
 		$(UV) run mypy .; \
 	fi
 
@@ -105,6 +111,31 @@ test: ## Run the test suite
 	else \
 		$(UV) run pytest; \
 	fi
+
+test-db: ## [M4] Run the test suite in the container against real PostgreSQL
+	@$(call require,$(COMPOSE_FILE),M2-04 (docker-compose.yml))
+	@# The host suite runs on in-memory SQLite: fast, and it needs nothing
+	@# running. This runs the SAME suite against the real engine, for the
+	@# behaviour SQLite cannot answer for — constraints, transaction semantics,
+	@# JSON fields, collation.
+	@#
+	@# It runs INSIDE the container because the database port is deliberately
+	@# not published (M4-01), so the host cannot reach it.
+	@#
+	@# DJANGO_TEST_DATABASE_URL, not DATABASE_URL: the test layer only switches
+	@# engines for this dedicated variable, so a developer's .env can never
+	@# silently redirect the suite. Expanded in the container's shell, which is
+	@# where DATABASE_URL is defined — hence the escaped $$.
+	@#
+	@# Deliberately NOT part of `make check` (tradeoff 62): that gate runs on
+	@# the host and must not start failing whenever the stack is down.
+	@# DJANGO_SETTINGS_MODULE is pinned here and must be. The container sets it
+	@# to config.settings.development, and pytest-django prefers the ENVIRONMENT
+	@# over pyproject.toml's ini value — so without this the suite silently runs
+	@# under development settings, against the DEVELOPMENT database, and fails
+	@# with a misleading "doesn't declare an explicit app_label".
+	$(COMPOSE) exec -T $(SERVICE) sh -c 'DJANGO_SETTINGS_MODULE=config.settings.test \
+		DJANGO_TEST_DATABASE_URL="$$DATABASE_URL" python -m pytest'
 
 check: lint typecheck test ## Run lint, typecheck and test (local pre-push gate)
 
@@ -245,7 +276,7 @@ clean: ## Remove the virtualenv and tool caches (never touches .env or data)
 # Every target is phony: none produces a file of its own name. Without this a
 # directory named `build` would silently make `make build` a no-op.
 .PHONY: help install install-prod lock upgrade audit \
-        lint format typecheck test check \
+        lint format typecheck test test-db check \
         build up down logs ps shell \
         migrate makemigrations migrations-check django-shell superuser db-shell \
         backlog-check backlog-plan backlog-sync \

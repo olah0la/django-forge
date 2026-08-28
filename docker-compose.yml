@@ -33,9 +33,10 @@
 x-app-base: &app-base
   build:
     context: .
-    # The named runtime stage in the Dockerfile. Without `target`, Compose would
-    # build the last stage, which happens to be the same one today — being
-    # explicit keeps that true when stages are added.
+    # The named runtime stage in the Dockerfile — no test tooling, nothing that
+    # is not needed to serve a request. Being explicit matters now that later
+    # stages exist: without `target`, Compose would build the LAST stage, which
+    # is `dev`. `app-prod` inherits this; the `app` service overrides it below.
     target: runtime
 
   # Configuration comes from the environment, never from this file: it is
@@ -66,7 +67,11 @@ services:
 
     build:
       context: .
-      target: runtime
+      # `dev` is `runtime` plus the development virtualenv (ruff, mypy,
+      # pytest). Needed so `make test-db` can run the suite inside the network,
+      # against the real database — its port is deliberately not published, so
+      # the tests cannot reach it from the host. See the Dockerfile's dev stage.
+      target: dev
       args:
         # On Linux a bind mount keeps the host's numeric owner, so a container
         # user with a different UID cannot write the files it just mounted. The

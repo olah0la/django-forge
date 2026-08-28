@@ -9,7 +9,6 @@ import re
 from pathlib import Path
 
 import pytest
-from django.conf import settings
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SETTINGS_DIR = REPO_ROOT / "config" / "settings"
@@ -131,8 +130,24 @@ def test_env_example_exists_and_holds_no_real_secret():
     )
 
 
-def test_test_layer_uses_an_in_memory_database():
-    assert settings.DATABASES["default"]["NAME"] == ":memory:"
+def test_test_layer_uses_an_in_memory_database(load_settings):
+    """Asserted through a fresh import, not against the live settings object.
+
+    This suite now runs under two engines — SQLite on the host, PostgreSQL
+    under `make test-db` — so reading `settings.DATABASES` here would assert
+    whichever one happens to be running. What matters is the DEFAULT: with
+    DJANGO_TEST_DATABASE_URL unset, the layer must choose SQLite.
+    """
+    rc, out, err = load_settings(
+        "test",
+        {"DJANGO_TEST_DATABASE_URL": ""},
+        "{'name': settings.DATABASES['default']['NAME'],"
+        " 'engine': settings.DATABASES['default']['ENGINE']}",
+    )
+    assert rc == 0, err
+    cfg = json.loads(out)
+    assert cfg["name"] == ":memory:"
+    assert "sqlite3" in cfg["engine"]
 
 
 # ---------------------------------------------------------------------------
@@ -407,12 +422,50 @@ def test_production_also_requires_database_url(load_settings):
     assert "DATABASE_URL is not set" in err
 
 
-def test_test_layer_needs_no_database_url():
-    """The test layer defines its own in-memory SQLite.
+def test_test_layer_needs_no_database_url(load_settings):
+    """The test layer supplies its own database and never requires a URL.
 
-    Requiring a URL in base would force one on a suite that never connects —
+    Requiring one in base would force it on a suite that need not connect —
     and pytest-django imports settings at startup, so it would fail before a
     single test ran.
     """
-    assert settings.DATABASES["default"]["NAME"] == ":memory:"
-    assert "sqlite3" in settings.DATABASES["default"]["ENGINE"]
+    rc, out, err = load_settings(
+        "test",
+        {"DATABASE_URL": "", "DJANGO_TEST_DATABASE_URL": ""},
+        "{'engine': settings.DATABASES['default']['ENGINE']}",
+    )
+    assert rc == 0, err
+    assert "sqlite3" in json.loads(out)["engine"]
+
+
+def test_test_layer_switches_engine_for_its_own_variable(load_settings):
+    rc, out, err = load_settings(
+        "test",
+        {"DJANGO_TEST_DATABASE_URL": "postgresql://forge:secret@db:5432/forge"},
+        "{'engine': settings.DATABASES['default']['ENGINE'],"
+        " 'host': settings.DATABASES['default']['HOST']}",
+    )
+    assert rc == 0, err
+    cfg = json.loads(out)
+    assert cfg["engine"] == "django.db.backends.postgresql"
+    assert cfg["host"] == "db"
+
+
+def test_database_url_alone_does_not_redirect_the_test_suite(load_settings):
+    """The reason the variable is separate, pinned as behaviour.
+
+    If DATABASE_URL switched the test database, any developer with one in their
+    .env would silently point the whole suite at a container port that is not
+    published — and `make test` would fail on their machine and nowhere else.
+    That is not hypothetical; M3-05 records exactly this failure.
+    """
+    rc, out, err = load_settings(
+        "test",
+        {
+            "DATABASE_URL": "postgresql://forge:secret@db:5432/forge",
+            "DJANGO_TEST_DATABASE_URL": "",
+        },
+        "{'engine': settings.DATABASES['default']['ENGINE']}",
+    )
+    assert rc == 0, err
+    assert "sqlite3" in json.loads(out)["engine"]

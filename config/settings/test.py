@@ -1,12 +1,13 @@
-"""Test settings: fast, isolated, and never touching real infrastructure.
+"""Test settings: fast and isolated by default, faithful on demand.
 
-Selected by pyproject.toml's pytest configuration.
+Selected by pyproject.toml's pytest configuration. The database is SQLite
+unless DJANGO_TEST_DATABASE_URL is set — see the DATABASES block below.
 """
 
 # NOTE: importing base requires DATABASE_URL, because the base layer has no
-# fallback on purpose. conftest.py supplies a dummy value; the DATABASES
-# override below then replaces it entirely, so nothing here ever connects to
-# PostgreSQL.
+# fallback on purpose. conftest.py supplies a dummy value, and the DATABASES
+# block below replaces it entirely — the test database is chosen by
+# DJANGO_TEST_DATABASE_URL, never by DATABASE_URL.
 from .base import *  # noqa: F403
 
 DEBUG = False
@@ -17,26 +18,48 @@ ALLOWED_HOSTS = ["testserver", "localhost"]
 # Safe because this layer is never served.
 SECRET_KEY = "test-only-not-a-real-key"  # noqa: S105
 
-# In-memory database: no file on disk, no cleanup, and markedly faster.
+# Two engines, chosen by one variable.
 #
-# Still SQLite even though M4-01 added a PostgreSQL service, deliberately: the
-# current tests cover settings and configuration and touch no database
-# behaviour, so switching would make every run depend on a container for no
-# added coverage.
+#   unset  ->  in-memory SQLite. `make test` on the host: fast, no container,
+#              no cleanup. Covers settings, configuration, and any model
+#              behaviour that is not engine-specific.
+#   set    ->  that database. `make test-db` inside the container: the real
+#              engine, for constraints, transaction semantics, JSON fields and
+#              collation — none of which SQLite can answer for.
 #
-# TODO(M4-04): switch to PostgreSQL when the first model or migration test
-# arrives. PostgreSQL-specific behaviour — constraints, transaction semantics,
-# JSON fields, collation — cannot be tested against SQLite, and a test suite
-# that passes on SQLite while production runs PostgreSQL is worse than none.
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": ":memory:",
+# WHY A DEDICATED VARIABLE AND NOT `DATABASE_URL`. Reusing it would mean any
+# developer with one in their `.env` silently redirects the whole suite at a
+# database port that is deliberately not published (M4-01), and `make test`
+# starts failing on their machine and nowhere else. That is not hypothetical:
+# it is exactly what happened in M3-05, when the suite began reading the
+# developer's `.env` and six tests failed for one person only. This variable is
+# set by `make test-db` and by nothing else.
+#
+# The fallback is safe here in a way it would NOT be in base.py, where a silent
+# SQLite default would let production commands run against the wrong engine.
+# The test layer never serves traffic, and the engine it used is visible in the
+# name of the command you ran.
+if env.str("DJANGO_TEST_DATABASE_URL", default="").strip():  # noqa: F405
+    DATABASES = {"default": env.db_url("DJANGO_TEST_DATABASE_URL")}  # noqa: F405
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": ":memory:",
+        }
     }
-}
 
 # The default hasher is deliberately slow to resist brute force. That is exactly
 # wrong for tests, where it dominates the runtime of anything creating a user.
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 
 EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
+
+# A test-only app holding concrete models to exercise the abstract bases in
+# apps/core/models.py. Abstract models create no table and cannot be queried,
+# so the behaviour they provide can only be tested through a subclass.
+#
+# Registered HERE and nowhere else: these models must never reach a real
+# database. The app has no migrations, so Django creates its tables directly
+# during test-database setup.
+INSTALLED_APPS = [*INSTALLED_APPS, "tests.testapp"]  # noqa: F405
