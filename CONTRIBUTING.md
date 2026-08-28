@@ -107,6 +107,25 @@ the guard prevents.
 Add your project's own seed data at the marked extension point in
 `apps/core/management/commands/seed.py`.
 
+### Before something risky, dump
+
+Seeding gets you a *known* database back. When what you want back is the one you had — the state you
+spent an afternoon clicking into existence, or the data a migration is about to rewrite — dump it
+first:
+
+```bash
+make db-dump                                  # → backups/forge-<timestamp>.dump
+make migrate                                  # the risky thing
+make db-restore FILE=backups/forge-<ts>.dump  # if it went wrong
+```
+
+Restoring **drops and rebuilds** the database, so it asks you to type the database name back before
+it does (`FORCE=1` skips the prompt). Dumps are git-ignored and must stay that way — a dump holds
+whatever was in your database, and this is a template that others clone.
+
+This is a local convenience and **not a backup strategy**; the distinction, and the round trip
+verified end to end, are in [docs/backups.md](docs/backups.md).
+
 ### Two things not to "fix"
 
 **The virtualenv lives at `/opt/venv`, not `/app/.venv`.** It has to sit outside the mounted path:

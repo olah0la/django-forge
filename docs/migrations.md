@@ -20,6 +20,7 @@ The short version a reviewer uses in a pull request is the
 ## The everyday loop
 
 ```bash
+make db-dump             # first, if the migration looks risky — see backups.md
 make makemigrations      # generate from model changes
                          # -- then READ the generated file --
 make migrations-check    # fail if any model change has no migration
@@ -401,6 +402,8 @@ replaced with a `RunPython.noop`, or deleted along with the range being squashed
 ## See also
 
 - [migration review checklist](../CONTRIBUTING.md#migration-review-checklist) — the PR-time short form
+- [backups.md](backups.md) — `make db-dump` before a migration you are unsure of, and the restore
+  that undoes it locally
 - [layout.md](layout.md#the-database) — the database service, `DATABASE_URL`, connection reuse
 - [Django: migration operations](https://docs.djangoproject.com/en/5.2/ref/migration-operations/)
 - [PostgreSQL: `ALTER TABLE`](https://www.postgresql.org/docs/17/sql-altertable.html) — which forms

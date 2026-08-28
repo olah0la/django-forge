@@ -121,3 +121,92 @@ def test_makefile_exposes_the_drift_check():
     assert re.search(r"^migrations-check:.*##", makefile, re.MULTILINE), (
         "make migrations-check must exist and carry a ## comment so `make help` lists it"
     )
+
+
+# ---------------------------------------------------------------------------
+# M4-06: the dump commands must not read as a backup policy
+# ---------------------------------------------------------------------------
+# The same class of silently-failing criterion as the checklist above. A
+# documented dump command is easily mistaken for a backup strategy, and the
+# disclaimer is the first thing a later tightening pass would cut as
+# "defensive" — leaving a template that appears to ship backups.
+BACKUPS_DOC = REPO_ROOT / "docs" / "backups.md"
+
+
+def test_backups_doc_disclaims_a_backup_strategy_before_teaching_the_commands():
+    """The caveat has to come first, not in a footnote.
+
+    Position is the assertion. A reader who has already copied the command has
+    stopped reading, so a disclaimer below the examples is one nobody reaches.
+    """
+    text = BACKUPS_DOC.read_text()
+    disclaimer = re.search(r"not a (production )?backup strategy", text, re.IGNORECASE)
+    assert disclaimer, "docs/backups.md no longer says this is not a backup strategy"
+    assert disclaimer.start() < text.index("make db-dump"), (
+        "the disclaimer must appear before the first dump command, not after it"
+    )
+
+
+# What a real strategy has that a dump on a laptop does not. Naming them is the
+# point: "this is not a backup strategy" tells a reader they are missing
+# something without telling them what, which is not actionable.
+REAL_STRATEGY_ELEMENTS = [
+    pytest.param([r"point-in-time|PITR|WAL"], id="point-in-time recovery"),
+    pytest.param([r"off-host|off-site|offsite"], id="storage off the host"),
+    pytest.param([r"retention|rotation"], id="retention and rotation"),
+    pytest.param([r"monitor\w*|alert"], id="monitoring that the backup ran"),
+    pytest.param([r"rehears\w*|tested|untested|restore drill"], id="rehearsed restores"),
+]
+
+
+@pytest.mark.parametrize("patterns", REAL_STRATEGY_ELEMENTS)
+def test_backups_doc_names_what_a_real_strategy_needs(patterns):
+    text = BACKUPS_DOC.read_text()
+    for pattern in patterns:
+        assert re.search(pattern, text, re.IGNORECASE), (
+            f"docs/backups.md no longer names {pattern!r} among what a real strategy needs"
+        )
+
+
+def test_dump_output_is_git_ignored():
+    """M4-06 criterion 3. A dump holds real data; this is a template others clone.
+
+    Anchored on purpose, so an application directory named `backups/` stays
+    trackable — the same reasoning as /media/ above it.
+    """
+    assert "/backups/" in (REPO_ROOT / ".gitignore").read_text(), (
+        "dump output must stay git-ignored"
+    )
+
+
+def test_makefile_exposes_dump_and_restore():
+    makefile = (REPO_ROOT / "Makefile").read_text()
+    for target in ("db-dump", "db-restore"):
+        assert re.search(rf"^{target}:.*##", makefile, re.MULTILINE), (
+            f"make {target} must exist and carry a ## comment so `make help` lists it"
+        )
+
+
+def test_restore_validates_the_dump_before_dropping_anything():
+    """Order is the whole safety property, and it is invisible when wrong.
+
+    The first version of db-restore dropped the database and only then found
+    the file unreadable — a recovery tool that destroys data when handed the
+    wrong path. Reversing these two lines restores that behaviour silently.
+    """
+    makefile = (REPO_ROOT / "Makefile").read_text()
+    recipe = makefile[makefile.index("\ndb-restore:") :]
+    recipe = recipe[: recipe.index("\n##@")]
+
+    # Command lines only. Matching `pg_restore -l` anywhere would find the
+    # comment that explains this rule, which sits above both commands and
+    # would keep the test green after the check itself moved.
+    commands = "\n".join(
+        line for line in recipe.splitlines() if not line.lstrip().startswith("@#")
+    )
+    preflight = commands.index("pg_restore -l")
+    drop = commands.index("DROP DATABASE")
+    assert preflight < drop, (
+        "db-restore must list the archive before dropping the database, "
+        "or a wrong FILE= destroys the database and only then reports the error"
+    )

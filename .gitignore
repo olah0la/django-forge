@@ -79,6 +79,12 @@ db.sqlite3-journal
 /mediafiles/
 /media/
 
+# Database dumps from `make db-dump`. They hold whatever was in your database,
+# which is the one thing a template must never carry into a clone. Anchored for
+# the same reason as /media/ above: an app directory named `backups/` stays
+# trackable. See docs/backups.md — a local convenience, not a backup strategy.
+/backups/
+
 *.log
 local_settings.py
 

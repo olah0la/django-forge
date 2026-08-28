@@ -36,6 +36,12 @@ MANAGE  ?= python manage.py
 COMPOSE_FILE ?= docker-compose.yml
 MANAGE_FILE  ?= manage.py
 
+# Where `make db-dump` writes. Git-ignored (.gitignore), and deliberately inside
+# the project rather than /tmp: a dump taken before a risky migration should
+# still be there tomorrow. See docs/backups.md — these are a local convenience,
+# NOT a backup strategy.
+BACKUP_DIR ?= backups
+
 # The local planning documents, and the tool that projects them onto GitHub.
 # Both are git-ignored and therefore absent from a fresh clone, which is why
 # the targets below check for them the same way the [M2]/[M3] targets do.
@@ -218,6 +224,103 @@ db-shell: ## [M4] Open a psql session against the development database
 	@# psql client is required.
 	$(COMPOSE) exec db psql -U "$${POSTGRES_USER:-forge}" -d "$${POSTGRES_DB:-forge}"
 
+db-dump: ## [M4] Dump the development database to backups/
+	@$(call require,$(COMPOSE_FILE),M2-04 (docker-compose.yml))
+	@# A LOCAL CONVENIENCE, NOT A BACKUP STRATEGY. Read docs/backups.md before
+	@# anyone comes to depend on this.
+	@#
+	@# pg_dump runs INSIDE the db container, so client and server are always the
+	@# same 17.6 build. A host-installed pg_dump of a different major version
+	@# cannot read this server's data, and that skew is the classic way a
+	@# "working" backup command starts failing after an unrelated upgrade.
+	@#
+	@# -T disables TTY allocation. The widely-repeated reason is that a TTY's
+	@# line discipline rewrites LF to CRLF and corrupts the binary archive.
+	@# TESTED HERE, and it did NOT reproduce: on Compose v5.5.0, dumps taken
+	@# with -T, without it, and with -t forced under a pty were all 29,994
+	@# bytes and all restored. Compose drops the pty when stdout is redirected.
+	@#
+	@# -T stays anyway, for a reason that survives the test: correctness must
+	@# not depend on Compose's auto-detection of where stdout is pointing. The
+	@# flag costs nothing and makes the requirement explicit — same as test-db.
+	@#
+	@# Written to <file>.partial and renamed only on success. The shell creates
+	@# a redirect target BEFORE pg_dump runs, so a failed dump would otherwise
+	@# leave a zero-byte file that looks exactly like a backup.
+	@set -u; \
+	db="$${POSTGRES_DB:-forge}"; \
+	out="$${FILE:-$(BACKUP_DIR)/$$db-$$(date +%Y%m%d-%H%M%S).dump}"; \
+	mkdir -p "$$(dirname "$$out")"; \
+	trap 'rm -f "$$out.partial"' EXIT; \
+	$(COMPOSE) exec -T db pg_dump \
+		-U "$${POSTGRES_USER:-forge}" -d "$$db" --format=custom > "$$out.partial"; \
+	mv "$$out.partial" "$$out"; \
+	printf '\n  Dumped %s -> %s (%s)\n\n' "$$db" "$$out" "$$(du -h "$$out" | cut -f1)"
+
+db-restore: ## [M4] Restore a dump, REPLACING the development database
+	@$(call require,$(COMPOSE_FILE),M2-04 (docker-compose.yml))
+	@# DESTRUCTIVE. Drops the development database and rebuilds it from FILE.
+	@#
+	@#     make db-restore FILE=backups/forge-20260828-141230.dump
+	@#
+	@# Drop-and-recreate rather than pg_restore --clean (tradeoff 69): --clean
+	@# drops objects one at a time in archive order and fails noisily on
+	@# anything the dump does not know about, leaving a half-restored database.
+	@# An empty database has no such ordering to get wrong.
+	@#
+	@# The drop runs against the `postgres` maintenance database — you cannot
+	@# drop the database you are connected to — and needs WITH (FORCE) because
+	@# DJANGO_CONN_MAX_AGE keeps the app's connections open across requests.
+	@# Without it: "database is being accessed by other users". FORCE is
+	@# PostgreSQL 13+; this stack pins 17.6.
+	@#
+	@# The archive is listed with `pg_restore -l` BEFORE anything is dropped.
+	@# Without that pre-flight the order is drop-then-discover: pointing this
+	@# at a truncated or wrong file destroyed the database and only then
+	@# reported "input file does not appear to be a valid archive". Measured
+	@# during M4-06, on the first version of this target.
+	@set -u; \
+	if [ -z "$${FILE:-}" ]; then \
+		printf '\n  make db-restore needs FILE=<dump>\n\n'; \
+		printf '    e.g. make db-restore FILE=$(BACKUP_DIR)/forge-20260828-141230.dump\n'; \
+		printf '    Run "make db-dump" first, or "ls $(BACKUP_DIR)" to see what you have.\n\n'; \
+		exit 1; \
+	fi; \
+	if [ ! -f "$$FILE" ]; then \
+		printf '\n  No such dump: %s\n\n' "$$FILE"; \
+		exit 1; \
+	fi; \
+	db="$${POSTGRES_DB:-forge}"; user="$${POSTGRES_USER:-forge}"; \
+	if ! $(COMPOSE) exec -T db pg_restore -l < "$$FILE" >/dev/null 2>&1; then \
+		printf '\n  Not a readable dump: %s\n\n' "$$FILE"; \
+		printf '    pg_restore cannot list its contents, so it will not restore\n'; \
+		printf '    either. The database has NOT been touched.\n\n'; \
+		exit 1; \
+	fi; \
+	if [ -z "$${FORCE:-}" ]; then \
+		printf '\n  This DROPS the database "%s" and replaces it with\n' "$$db"; \
+		printf '  the contents of %s.\n' "$$FILE"; \
+		printf '  Anything not in that file is gone, with no undo.\n\n'; \
+		printf '  Type the database name to continue: '; \
+		read -r reply; \
+		if [ "$$reply" != "$$db" ]; then \
+			printf '\n  Aborted. Nothing was changed.\n\n'; \
+			exit 1; \
+		fi; \
+		printf '\n'; \
+	fi; \
+	$(COMPOSE) exec -T db psql -v ON_ERROR_STOP=1 -q -U "$$user" -d postgres \
+		-c "DROP DATABASE IF EXISTS \"$$db\" WITH (FORCE)" \
+		-c "CREATE DATABASE \"$$db\" OWNER \"$$user\""; \
+	$(COMPOSE) exec -T db pg_restore \
+		--no-owner --no-privileges --exit-on-error \
+		-U "$$user" -d "$$db" < "$$FILE"; \
+	printf '  Restarting %s: its pooled connections were terminated by the drop.\n' "$(SERVICE)"; \
+	$(COMPOSE) restart $(SERVICE) >/dev/null; \
+	tables=$$($(COMPOSE) exec -T db psql -tAX -U "$$user" -d "$$db" \
+		-c "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'"); \
+	printf '\n  Restored %s from %s — %s tables in public.\n\n' "$$db" "$$FILE" "$$tables"
+
 ##@ Django — available from M3
 
 migrate: ## [M3] Apply database migrations
@@ -287,6 +390,7 @@ clean: ## Remove the virtualenv and tool caches (never touches .env or data)
 .PHONY: help install install-prod lock upgrade audit \
         lint format typecheck test test-db check \
         build up down logs ps shell \
-        migrate makemigrations migrations-check seed django-shell superuser db-shell \
+        migrate makemigrations migrations-check seed django-shell superuser \
+        db-shell db-dump db-restore \
         backlog-check backlog-plan backlog-sync \
         clean

@@ -157,11 +157,19 @@ make migrations-check   # fail if a model change has no migration — run before
 make db-shell           # a psql session against the development database
 make test-db            # run the test suite against real PostgreSQL, in the container
 make seed               # load development seed data — a superuser and permission groups
+make db-dump            # capture the local database before something risky
+make db-restore FILE=…  # put it back — drops and rebuilds the database first
 ```
 
 `make seed` is idempotent and **development-only**: it refuses unless `settings.SEED_ENABLED` is
 true, which only the development and test layers set — in code, never from `.env`, since that file
 is read by both Compose profiles.
+
+`make db-dump` and `make db-restore` (M4-06) are a **local convenience, not a backup strategy** —
+one file, on the same machine as the database it came from, protecting against your own next
+command and nothing else. [docs/backups.md](docs/backups.md) has the verified round trip and, more
+importantly, the list of what a real strategy has that this does not: point-in-time recovery,
+off-host storage, retention, monitoring, and rehearsed restores.
 
 **Shared abstract base models** (M4-04) give every model a UUIDv7 primary key and automatic
 created/updated timestamps:

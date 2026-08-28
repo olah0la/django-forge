@@ -196,9 +196,15 @@ services:
 | --- | --- |
 | `make down` | Stops containers, **keeps** the database |
 | `docker compose down -v` | **Deletes** the volume — unrecoverable, no prompt |
+| `make db-restore FILE=…` | **Drops** the database and rebuilds it from a dump — prompts first |
 
-The difference is one flag. `make down` never passes `-v`, so the destructive form has to be typed
-deliberately.
+The difference between the first two is one flag. `make down` never passes `-v`, so the destructive
+form has to be typed deliberately; `make db-restore` asks for the database name back for the same
+reason.
+
+Only the third has a way back, and only if you took a dump first — see
+[backups.md](backups.md), which is also emphatic that this is a local convenience and not a backup
+strategy.
 
 ### Connecting to it
 
