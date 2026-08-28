@@ -246,3 +246,20 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# --------------------------------------------------------------------------
+# Seed data
+# --------------------------------------------------------------------------
+# `manage.py seed` refuses to run unless this is True. OFF here, so production
+# inherits the safe value and never has to remember anything — the development
+# and test layers opt in.
+#
+# NOT read from the environment, deliberately. A .env is read by BOTH Compose
+# profiles (see docs/layout.md, "Layer-specific values do not belong in .env"),
+# so an env-readable flag would be one stray SEED_ENABLED=1 away from arming
+# the exact thing it exists to prevent. That is not hypothetical: the same
+# section records DJANGO_SETTINGS_MODULE in a .env silently making the
+# production-like profile run development settings.
+#
+# A layer sets this in code or it does not get it.
+SEED_ENABLED = False

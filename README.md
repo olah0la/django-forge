@@ -156,7 +156,12 @@ make makemigrations     # generate them from model changes
 make migrations-check   # fail if a model change has no migration — run before pushing
 make db-shell           # a psql session against the development database
 make test-db            # run the test suite against real PostgreSQL, in the container
+make seed               # load development seed data — a superuser and permission groups
 ```
+
+`make seed` is idempotent and **development-only**: it refuses unless `settings.SEED_ENABLED` is
+true, which only the development and test layers set — in code, never from `.env`, since that file
+is read by both Compose profiles.
 
 **Shared abstract base models** (M4-04) give every model a UUIDv7 primary key and automatic
 created/updated timestamps:

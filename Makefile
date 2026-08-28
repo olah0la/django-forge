@@ -240,6 +240,15 @@ migrations-check: ## [M4] Fail if a model change has no migration (pre-push)
 	@# gate fail whenever the stack happens to be down.
 	$(COMPOSE) exec $(SERVICE) $(MANAGE) makemigrations --check --dry-run
 
+seed: ## [M4] Load development seed data (superuser + permission groups)
+	@$(call require,$(MANAGE_FILE),M3-01 (manage.py))
+	@# Development only. The command refuses unless settings.SEED_ENABLED is
+	@# true, which only the development and test layers set — and NOT via an
+	@# environment variable, because a .env is read by both Compose profiles.
+	@# A --force flag would put the override back within reach, which is why
+	@# there is not one.
+	$(COMPOSE) exec $(SERVICE) $(MANAGE) seed
+
 django-shell: ## [M3] Open the Django REPL
 	@$(call require,$(MANAGE_FILE),M3-01 (manage.py))
 	$(COMPOSE) exec $(SERVICE) $(MANAGE) shell
@@ -278,6 +287,6 @@ clean: ## Remove the virtualenv and tool caches (never touches .env or data)
 .PHONY: help install install-prod lock upgrade audit \
         lint format typecheck test test-db check \
         build up down logs ps shell \
-        migrate makemigrations migrations-check django-shell superuser db-shell \
+        migrate makemigrations migrations-check seed django-shell superuser db-shell \
         backlog-check backlog-plan backlog-sync \
         clean

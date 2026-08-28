@@ -55,6 +55,10 @@ PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 
 EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
 
+# Enabled so the seed command's own tests can call it. The guard itself is
+# tested by overriding this to False, which is the case that matters.
+SEED_ENABLED = True
+
 # A test-only app holding concrete models to exercise the abstract bases in
 # apps/core/models.py. Abstract models create no table and cannot be queried,
 # so the behaviour they provide can only be tested through a subclass.

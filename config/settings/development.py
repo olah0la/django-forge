@@ -32,3 +32,7 @@ EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 # PostgreSQL, from DATABASE_URL. See database_from_url() for the connection
 # reuse settings and the worker-count arithmetic that bounds them.
 DATABASES = {"default": database_from_url()}
+
+# `manage.py seed` is allowed here. See base.py for why this is a code-level
+# layer decision rather than an environment variable.
+SEED_ENABLED = True

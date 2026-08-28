@@ -77,6 +77,36 @@ development dependency, `make lock && make build` as above.
 built, which is what makes it a faithful stand-in for a deployment. If you change a file and it does
 not take effect there, that is correct behaviour, not a bug.
 
+### Seed data
+
+An empty database is a poor place to work, so one command produces a known state:
+
+```bash
+make migrate
+make seed        # development only
+```
+
+That gives you:
+
+| | |
+| --- | --- |
+| A superuser | `admin` / `admin`, from `DJANGO_SUPERUSER_*` if you set them |
+| Group `read-only` | every `view_*` permission, and nothing else |
+| Group `user-admin` | add/change/view on users and groups — deliberately no delete |
+
+**Run it as often as you like.** It is idempotent: `get_or_create` on natural keys, and group
+permissions are `set()` rather than added, so a second run converges instead of accumulating. It
+also *re-asserts* the superuser's password every run — if you changed it by hand, seeding changes it
+back, and says so in its output.
+
+**It cannot run in production.** The command refuses unless `settings.SEED_ENABLED` is true, which
+only the development and test layers set. That flag is deliberately not readable from the
+environment: `.env` is shared by both Compose profiles, so a value there could arm the very thing
+the guard prevents.
+
+Add your project's own seed data at the marked extension point in
+`apps/core/management/commands/seed.py`.
+
 ### Two things not to "fix"
 
 **The virtualenv lives at `/opt/venv`, not `/app/.venv`.** It has to sit outside the mounted path:
