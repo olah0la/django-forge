@@ -1,9 +1,10 @@
-"""The versioned API instance.
+"""The versioned API instance, and the one place routers are mounted.
 
-One `NinjaAPI` object, mounted by `config/urls.py` at `/api/v1/`. Every router
-in the project attaches to it — from M5-02 each app contributes one — so this
-module is the single place that answers "what is the API, and where does it
-live?".
+One `NinjaAPI` object, mounted by `config/urls.py` at `/api/v1/`. It **defines
+no endpoints of its own**: each app owns its endpoints in `apps/<name>/api.py`,
+and this module attaches those routers. That is the whole point of the split —
+otherwise every feature branch edits this file and it becomes a permanent
+merge-conflict site. See docs/api.md.
 
 It sits in `config/` rather than in an app because it is project wiring, the
 same category as the root URLconf and the ASGI entrypoint. Endpoints belong to
@@ -14,7 +15,18 @@ That is the one decision here that cannot be revised once a client exists.
 """
 
 from django.conf import settings
-from ninja import NinjaAPI
+from ninja import NinjaAPI, Router
+
+# The dependency runs ONE WAY: config imports apps, never the reverse. A router
+# module that imports `config.api` — to reach `api` and decorate with it —
+# closes an import cycle, and the error it produces at startup points at the
+# import machinery rather than at the line that caused it.
+#
+# Importing app modules here is safe because nothing imports this file until
+# `config/urls.py` does, which happens after Django's app registry is ready.
+# Importing it from settings or from an AppConfig would drag app code in too
+# early; don't.
+from apps.core.api import router as core_router
 
 # ---------------------------------------------------------------------------
 # TWO DIFFERENT VERSION NUMBERS, and they are confused constantly
@@ -38,20 +50,45 @@ V1_PREFIX = "v1"
 # it is what lets a future v2 instance coexist with this one.
 V1_NAMESPACE = f"api-{V1_PREFIX}"
 
+# ---------------------------------------------------------------------------
+# The routers, and the only line an app adds to this file
+# ---------------------------------------------------------------------------
+# One entry per app: (URL prefix, router). A new app appends one line here; a
+# new ENDPOINT on an existing app touches nothing here at all.
+#
+# The prefix is the app's resource name and carries no slashes — Ninja joins it
+# to the mount point. Registration order is the order the docs page lists the
+# groups in, so keep it deliberate rather than alphabetical-by-accident.
+#
+# `core` is the deliberate exception: it mounts at the ROOT with an empty
+# prefix, because its endpoints answer for the API itself rather than for a
+# collection — `/api/v1/ping`, not `/api/v1/core/ping`. Feature apps always take
+# a prefix; docs/api.md explains why the exception is not extended.
+ROUTERS: list[tuple[str, Router]] = [
+    ("", core_router),
+]
+
 
 def build_api() -> NinjaAPI:
-    """Construct the v1 API instance from settings.
+    """Construct the v1 API instance from settings, with every router mounted.
 
     A function rather than a bare module-level constructor call so the
     configuration can be exercised: `docs_url` depends on a setting, and a
     constructor that runs at import time freezes that value for the life of the
     process, where `override_settings` cannot reach it.
 
+    Routers are mounted HERE rather than after the fact, so an instance built
+    for inspection is the same shape as the one being served — a test asserting
+    against a router-less instance would prove nothing. Mounting the same
+    `Router` object on a second instance is fine (verified against ninja 1.6.3);
+    what Ninja rejects is mounting it twice on the SAME instance.
+
     Do not access `.urls` on an instance built here for inspection. Ninja
     registers `urls_namespace` at that point and rejects a duplicate, so a
-    second instance sharing V1_NAMESPACE would raise ConfigError.
+    second instance sharing V1_NAMESPACE would raise ConfigError — and reading
+    `.urls` also freezes the router list, after which `add_router` raises.
     """
-    return NinjaAPI(
+    api = NinjaAPI(
         title=settings.API_TITLE,
         version=settings.API_VERSION,
         description=settings.API_DESCRIPTION,
@@ -72,24 +109,10 @@ def build_api() -> NinjaAPI:
         openapi_url="/openapi.json" if settings.API_DOCS_ENABLED else None,
     )
 
+    for prefix, router in ROUTERS:
+        api.add_router(prefix, router)
+
+    return api
+
 
 api = build_api()
-
-
-# ---------------------------------------------------------------------------
-# TODO(M5-02): this endpoint moves to apps/core/api.py as a router.
-# ---------------------------------------------------------------------------
-# M5-02 establishes the rule that the central instance mounts routers and holds
-# NO endpoint definitions of its own — otherwise this module grows without
-# bound and becomes a permanent merge-conflict site, since every feature branch
-# would edit it. This one lives here only until that pattern exists, so that
-# M5-01 can demonstrate a response through the versioned path.
-@api.get("/ping", summary="Liveness of the API layer", tags=["meta"])
-def ping(request) -> dict:
-    """Confirm the API is mounted and answering.
-
-    NOT a health check. M6-01 owns readiness and liveness endpoints, and those
-    have to answer for the database and any other dependency. This answers for
-    exactly one thing: that routing reached django-ninja.
-    """
-    return {"pong": True, "version": api.version}

@@ -174,9 +174,22 @@ open http://localhost:8000/api/v1/docs # interactive documentation, development 
 
 The version prefix is there from the first endpoint because adding one later breaks every
 integrated client at once — five characters now against a coordinated migration ever.
-[docs/api.md](docs/api.md) covers the two different version numbers that get confused, how a v2
-would run beside v1 through a deprecation window, and why the documentation is off by default in
-production. Routers per app arrive with **M5-02**.
+
+**Each app owns its endpoints** (M5-02). A router in `apps/<name>/api.py`, mounted by one line in
+`config/api.py`, which defines no endpoints itself:
+
+```python
+# apps/billing/api.py
+router = Router(tags=["billing"])
+
+@router.get("/invoices")          # -> GET /api/v1/billing/invoices
+def list_invoices(request: HttpRequest) -> list[dict]: ...
+```
+
+Adding an endpoint to an existing app touches that one file — which is the point, since a central
+registry is a file every feature branch conflicts in. [docs/api.md](docs/api.md) covers the prefix
+and tag conventions, the two different version numbers that get confused, how a v2 would run beside
+v1 through a deprecation window, and why the documentation is off by default in production.
 
 `make db-dump` and `make db-restore` (M4-06) are a **local convenience, not a backup strategy** —
 one file, on the same machine as the database it came from, protecting against your own next

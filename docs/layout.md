@@ -13,6 +13,8 @@ recorded in [ADR 0002](adr/0002-project-layout.md).
 │   └── wsgi.py          WSGI entrypoint
 ├── apps/                every application lives here
 │   └── core/            shared, cross-cutting code
+│       ├── api.py       the app's django-ninja router — one per app
+│       └── models.py    shared abstract base models
 ├── docs/                documentation, including ADRs
 └── tests/               test suite (arrives with the quality-gates phase)
 ```
@@ -28,8 +30,10 @@ recorded in [ADR 0002](adr/0002-project-layout.md).
 
 `config/api.py` holds the single `NinjaAPI` instance, mounted at `/api/v1/` by `config/urls.py`.
 The instance is project wiring and lives in `config/`; the routers that attach to it belong to the
-apps they serve (M5-02). **Read [api.md](api.md) before changing the URL prefix** — it is the one
-decision here that cannot be revised once a client exists.
+apps they serve. It **defines no endpoints itself** — it is a mounting table — and the dependency
+runs one way: `config/` imports app routers, and an app never imports `config.api`.
+**Read [api.md](api.md) before changing the URL prefix** — it is the one decision here that cannot
+be revised once a client exists.
 
 ## Settings layers
 
@@ -267,7 +271,7 @@ mkdir -p apps/<name>
 docker compose exec app python manage.py startapp <name> apps/<name>
 ```
 
-Then two steps that are easy to forget:
+Then three steps that are easy to forget:
 
 1. In `apps/<name>/apps.py`, set the **full dotted path**:
 
@@ -280,6 +284,19 @@ Then two steps that are easy to forget:
    bare name is the most common error with a nested `apps/` directory, and it fails confusingly.
 
 2. Add it to `LOCAL_APPS` in the settings module.
+
+3. If the app serves endpoints, create `apps/<name>/api.py` with a `router`, and add one line to
+   `ROUTERS` in `config/api.py`:
+
+   ```python
+   ROUTERS: list[tuple[str, Router]] = [
+       ("", core_router),
+       ("billing", billing_router),      # -> /api/v1/billing/...
+   ]
+   ```
+
+   The conventions — prefix, tags, and why `core` is the one router without a prefix — are in
+   [api.md](api.md#routers-one-per-app).
 
 ## Models
 

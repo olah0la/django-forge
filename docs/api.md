@@ -4,8 +4,9 @@ The HTTP API is built with [Django Ninja](https://django-ninja.dev/), not Django
 The two solve similar problems very differently, and **patterns copied from DRF tutorials generally
 do not apply here** — there are no serializers, no viewsets, no DRF permission classes.
 
-This document grows through M5. What exists today is the versioned instance and its documentation
-page; [what is still owed](#what-m5-still-owes-this-document) is listed at the bottom.
+This document grows through M5. What exists today is the versioned instance, the
+[router-per-app pattern](#routers-one-per-app), and the documentation page;
+[what is still owed](#what-m5-still-owes-this-document) is listed at the bottom.
 
 ```bash
 make up
@@ -18,8 +19,8 @@ open http://localhost:8000/api/v1/docs # interactive documentation
 ## One instance, mounted under a version prefix
 
 `config/api.py` holds a single `NinjaAPI` instance. `config/urls.py` mounts it, in one line, at
-`/api/v1/`. From M5-02 each app contributes a router that attaches to that instance; the instance
-itself will hold no endpoints of its own.
+`/api/v1/`. Each app contributes a router that attaches to that instance, and the instance
+[holds no endpoints of its own](#routers-one-per-app).
 
 It lives in `config/` rather than in an app because it is project wiring — the same category as the
 root URLconf and the ASGI entrypoint. Endpoints belong to apps; the thing that mounts them does not.
@@ -53,6 +54,113 @@ follows the URL prefix, not the release. A test asserts this.
 
 ---
 
+## Routers, one per app
+
+Endpoints are **never** defined on the API instance. Each app declares a router in
+`apps/<name>/api.py`, and `config/api.py` mounts it:
+
+```python
+# apps/billing/api.py
+from ninja import Router
+
+router = Router(tags=["billing"])          # tagged once, here — not per endpoint
+
+@router.get("/invoices")
+def list_invoices(request: HttpRequest) -> list[dict]:
+    ...
+```
+
+```python
+# config/api.py — the only file that knows an app has an API
+from apps.billing.api import router as billing_router
+
+ROUTERS: list[tuple[str, Router]] = [
+    ("", core_router),          # the exception, below
+    ("billing", billing_router),
+]
+```
+
+That is `GET /api/v1/billing/invoices`.
+
+**Why the split.** If every endpoint registered on the central instance, that module would grow
+without bound and become a permanent merge-conflict site, because every feature branch would edit
+the same file. Split this way, adding an endpoint to an existing app touches **one file** — the
+app's own router — and adding an app costs one line in `ROUTERS`.
+
+### The conventions
+
+| | Convention | Why |
+| --- | --- | --- |
+| Location | `apps/<name>/api.py`, a module-level object named `router` | One place to look, in every app, forever |
+| Prefix | The app's resource name, no slashes: `"billing"` | Ninja joins it to the mount point |
+| Tags | Exactly one, named for the app, set on the `Router` | Groups the app in the docs page; cannot be forgotten per endpoint |
+| Direction | `config/` imports apps; **an app never imports `config.api`** | The reverse is an import cycle that fails confusingly at startup |
+
+An app that outgrows one module turns `api.py` into a package — `apps/<name>/api/` whose
+`__init__.py` re-exports `router`. The import path `apps.<name>.api.router` does not change, so
+`config/api.py` never has to know which shape an app is in.
+
+Registration order in `ROUTERS` is the order the docs page lists the groups in. Keep it deliberate.
+
+### `core` is the one router without a prefix
+
+`apps/core/api.py` mounts at the API **root**: `/api/v1/ping`, not `/api/v1/core/ping`. Its
+endpoints answer for the API as a whole rather than for a collection, and a "core" segment in the
+URL would describe the codebase's layout rather than the resource.
+
+**The exception is not extended.** A feature app mounted at the root puts its resources in the API's
+root namespace, where the next app's resources collide with them — and unpicking that is a URL
+change, which is a breaking change for every client.
+
+### Adding an endpoint, adding an app
+
+| Task | What you edit |
+| --- | --- |
+| An endpoint on an existing app | That app's `api.py`. Nothing else. |
+| A new app's first endpoint | The app's `api.py`, plus one line in `ROUTERS` |
+
+The second is also step 3 of [adding an application](layout.md#adding-an-application).
+
+### Two errors Ninja raises, and what they actually mean
+
+```
+ConfigError: Router is already mounted to this API. When mounting the same router
+multiple times, you must provide unique url_name_prefix for each mount.
+```
+
+The same router reached `add_router` twice on one instance — usually because an app registered
+itself *and* was registered centrally. Keeping every mount in `ROUTERS`, rather than in
+`AppConfig.ready()` hooks, is what makes this hard to do by accident.
+
+```
+ConfigError: Cannot add routers after URLs have been generated.
+Add all routers before accessing api.urls
+```
+
+Ninja freezes the router list the first time `.urls` is read, which happens when Django loads the
+URLconf. Anything mounting a router later — a lazy import, a plugin, a hook — is too late, and the
+message names URL generation rather than the mount that caused it.
+
+### `operationId` follows the module path
+
+Ninja derives it as `module_name` with dots replaced, so `ping` in `apps/core/api.py` is
+`apps_core_api_ping` — it was `config_api_ping` before M5-02 moved the endpoint.
+
+**Moving a router module renames every operationId in it**, and generated clients bind to those
+names: a method disappears and a new one appears, which reads to the consumer as a breaking change
+even though no URL moved. This is not automated away here — a scheme that hides the module path
+hides a real cost. Where a published client depends on a name, pin it:
+
+```python
+@router.get("/invoices", operation_id="list_invoices")
+```
+
+A collision — pinned or derived — is only *printed* by Ninja, never raised: the document then has
+two operations claiming one name, and a generated client keeps whichever it read last. A test
+asserts every id in the document is unique.
+
+---
+
 ## How a v2 would be introduced
 
 Decided now, while nothing depends on it. Under pressure — a breaking change already required, a
@@ -76,10 +184,12 @@ consumer already waiting — this gets decided badly.
 **What makes this work** is that the two are separate instances with separate namespaces — nothing
 in the codebase assumes there is only one API.
 
-**What breaks it** is sharing a `Router` object between the two instances. Ninja raises a
-configuration error when the same router is added twice, and reusing routers across versions also
-defeats the point: v2 exists precisely because the shape changed. Give v2 its own routers, importing
-from v1 only where the behaviour is genuinely identical.
+**What breaks it** is sharing a `Router` object between the two instances. Ninja permits this — the
+duplicate-mount check is per instance, so the same router mounted on `api_v1` and `api_v2` serves
+happily from both (measured on 1.6.3; do not rely on the library to stop you). It defeats the point:
+v2 exists precisely because the shape changed, and a shared router means every v1 change lands in v2
+unreviewed. Give v2 its own routers, importing from v1 only where the behaviour is genuinely
+identical.
 
 Endpoints that did not change between versions still have to be *served* by both. Duplication
 across a deprecation window is not a design flaw — it is the deprecation window doing its job.
@@ -150,8 +260,6 @@ renders without its assets. `TODO(M6-03)` owns making that part of the image bui
 
 Each of these arrives with its issue, and this file is where it gets written down:
 
-- **M5-02** — the router-per-app pattern; the `/ping` endpoint currently defined on the instance
-  moves to `apps/core/api.py`, and the central instance stops holding endpoints
 - **M5-03** — request and response schema conventions, and why input and output schemas stay
   separate
 - **M5-04** — the pagination strategy applied to every list endpoint

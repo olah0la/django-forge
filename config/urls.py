@@ -1,9 +1,9 @@
 """Root URL configuration.
 
-Kept deliberately thin. Applications do not add routes here directly: from
-M5-02 each app contributes a django-ninja router, and this module mounts the
-single API instance. That keeps this file from becoming a permanent
-merge-conflict site as the project grows.
+Kept deliberately thin. Applications do not add routes here directly: each app
+contributes a django-ninja router, mounted by `config/api.py`, and this module
+mounts the single API instance in one line. That keeps this file from becoming a
+permanent merge-conflict site as the project grows.
 """
 
 from django.contrib import admin

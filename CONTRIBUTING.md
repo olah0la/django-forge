@@ -214,6 +214,8 @@ description:
 3. **The change matches the issue's scope** — unrelated improvements belong in their own issue.
 4. **A newcomer could understand it.** Comments explain *why*, not *what*.
 5. **Nothing secret is committed.** No credentials, tokens, or real `.env` values.
+6. **Endpoints are on an app's router, never on the API instance.** `config/api.py` mounts routers
+   and defines none — see [docs/api.md](docs/api.md#routers-one-per-app).
 
 Reviewers ask questions to understand, not to challenge. If a comment reads as blunt, assume it is
 brevity rather than criticism — and if a review comment is unclear, ask.
