@@ -187,9 +187,24 @@ def list_invoices(request: HttpRequest) -> list[dict]: ...
 ```
 
 Adding an endpoint to an existing app touches that one file — which is the point, since a central
-registry is a file every feature branch conflicts in. [docs/api.md](docs/api.md) covers the prefix
-and tag conventions, the two different version numbers that get confused, how a v2 would run beside
-v1 through a deprecation window, and why the documentation is off by default in production.
+registry is a file every feature branch conflicts in.
+
+**Input and output schemas are separate types, and responses are allow-lists** (M5-03):
+
+```python
+class UserOut(ModelSchema):          # what the API will say back
+    class Meta:
+        model = User
+        fields = ["id", "username", "email", "date_joined"]
+        # NOT fields = "__all__", which would publish password,
+        # is_superuser, is_staff — and every field added after today
+```
+
+`apps/core/schemas.py` is the worked example, with no endpoints attached on purpose: authentication
+is still a stub (M5-07). [docs/api.md](docs/api.md) covers the naming convention, why the
+directions stay separate, partial updates with `PatchDict`, the prefix and tag conventions, the two
+different version numbers that get confused, how a v2 would run beside v1 through a deprecation
+window, and why the documentation is off by default in production.
 
 `make db-dump` and `make db-restore` (M4-06) are a **local convenience, not a backup strategy** —
 one file, on the same machine as the database it came from, protecting against your own next

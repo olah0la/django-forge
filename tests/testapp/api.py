@@ -1,20 +1,29 @@
-"""A router used only to exercise the composition pattern. Test layer only.
+"""Routers used only by tests. Test layer only, never mounted on the real API.
 
 The shipped demonstration of the pattern is `apps/core/api.py`, and it is the
 documented exception: it mounts at the API root with an empty prefix. So the
 *prefix* half of the convention has nothing in the shipped code to assert
 against.
 
-This is that missing half — a router shaped exactly like a feature app's, which
-tests mount on a throwaway instance. It stays here rather than becoming a real
-app under `apps/` because an app shipped purely as a demonstration is one every
-derived project has to delete; M7-04 owns the removable worked example.
+`router` below is that missing half — shaped exactly like a feature app's, and
+mounted on a throwaway instance by the tests. `users_router` is the second half
+of the same argument for M5-03: it exercises the shipped schemas through real
+HTTP without the project shipping a user API.
 
-**Never mounted on the real API instance.** It is imported by tests only.
+Both stay here rather than becoming real apps under `apps/`, because an app
+shipped purely as a demonstration is one every derived project has to delete;
+M7-04 owns the removable worked example.
+
+**Never mounted on the real API instance.** They are imported by tests only —
+tests/testapp/urls.py mounts them on an instance of their own.
 """
 
+from django.contrib.auth.models import User
 from django.http import HttpRequest
-from ninja import Router
+from django.shortcuts import get_object_or_404
+from ninja import PatchDict, Router
+
+from apps.core.schemas import UserCreateIn, UserOut, UserUpdateIn
 
 # The convention a feature app follows: one tag, named for the app, set on the
 # router so every operation inherits it.
@@ -24,3 +33,55 @@ router = Router(tags=["things"])
 @router.get("/", summary="List things")
 def list_things(request: HttpRequest) -> list[dict]:
     return [{"label": "a thing"}]
+
+
+# ---------------------------------------------------------------------------
+# The schema round trip (M5-03)
+# ---------------------------------------------------------------------------
+# `apps/core/schemas.py` ships the worked example with no endpoints attached,
+# deliberately: authentication is still a stub (M5-07), so a real unauthenticated
+# user API must not exist. These endpoints are how those schemas are exercised
+# anyway — the SHIPPED types, driven through real HTTP, mounted only by
+# tests/testapp/urls.py.
+users_router = Router(tags=["users"])
+
+
+@users_router.post("/", response=UserOut, summary="Create a user")
+def create_user(request: HttpRequest, payload: UserCreateIn) -> User:
+    """Input and output are different types, and this is where it shows.
+
+    The payload carries a password; the response cannot contain it, because
+    UserOut does not list it. No filtering happens here — the separation does
+    the work.
+
+    `.dict()` rather than attribute access, because mypy cannot see fields that
+    ModelSchema derives from the model at runtime: `payload.username` is an
+    attr-defined error even though it resolves correctly. See docs/api.md.
+    """
+    data = payload.dict()
+    password = data.pop("password")  # the plaintext never reaches the column
+
+    user = User(**data)
+    user.set_password(password)
+    user.save()
+    return user
+
+
+@users_router.get("/{user_id}", response=UserOut, summary="Read a user")
+def read_user(request: HttpRequest, user_id: int) -> User:
+    return get_object_or_404(User, id=user_id)
+
+
+@users_router.patch("/{user_id}", response=UserOut, summary="Update a user")
+def update_user(request: HttpRequest, user_id: int, payload: PatchDict[UserUpdateIn]) -> User:
+    """`PatchDict` hands over only the keys the client actually sent.
+
+    With a plain all-optional schema, a field the client never mentioned and a
+    field explicitly set to null arrive identically, and the loop below would
+    blank out every column the client did not name.
+    """
+    user = get_object_or_404(User, id=user_id)
+    for attribute, value in payload.items():
+        setattr(user, attribute, value)
+    user.save()
+    return user

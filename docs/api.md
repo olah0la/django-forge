@@ -5,8 +5,8 @@ The two solve similar problems very differently, and **patterns copied from DRF 
 do not apply here** — there are no serializers, no viewsets, no DRF permission classes.
 
 This document grows through M5. What exists today is the versioned instance, the
-[router-per-app pattern](#routers-one-per-app), and the documentation page;
-[what is still owed](#what-m5-still-owes-this-document) is listed at the bottom.
+[router-per-app pattern](#routers-one-per-app), the [schema conventions](#schemas), and the
+documentation page; [what is still owed](#what-m5-still-owes-this-document) is listed at the bottom.
 
 ```bash
 make up
@@ -161,6 +161,95 @@ asserts every id in the document is unique.
 
 ---
 
+## Schemas
+
+A schema is the contract: it validates what comes in, shapes what goes out, and generates the
+OpenAPI document from the same declaration. Schemas live in `apps/<name>/schemas.py`, beside the
+router that uses them — the package form (`apps/<name>/schemas/`) is the escape hatch when one
+module is no longer enough.
+
+`apps/core/schemas.py` is the worked example, over `django.contrib.auth.User`. **It has no
+endpoints attached, deliberately** — authentication is still a documented stub (M5-07), and a
+template shipping a working unauthenticated user API would be shipping a vulnerability to every
+project forged from it. Copy the shape; add the endpoints once you have auth.
+The round trip is exercised in `tests/test_schemas.py` against a test-only router.
+
+### Input and output are always separate types
+
+| Name | Direction | Holds |
+| --- | --- | --- |
+| `UserCreateIn` | request | What a client may set when creating |
+| `UserUpdateIn` | request | The smaller set it may change afterwards |
+| `UserOut` | response | What the API is willing to say back |
+
+**Every input type ends `In`, every output type ends `Out`.** Direction in the name is what makes a
+misuse visible at the call site: `response=UserCreateIn` reads as obviously wrong.
+
+One shared schema is genuinely less code, which is why it happens under time pressure. It also does
+two things silently: fields meant to be read-only become writable, and fields meant to be write-only
+appear in responses. The example makes it concrete — `password` exists on `UserCreateIn` and
+**cannot** appear in any response, because `UserOut` is a different type that does not list it. No
+filtering code enforces that. The separation is the enforcement.
+
+Create and update differ for the same reason: a client may set a username on creation and may not
+change it afterwards, and a password change is its own operation with its own checks. A single
+schema cannot express either.
+
+### Response schemas are allow-lists
+
+`Meta.fields` names every field, always. Ninja offers two shortcuts, and both are deny-lists in
+disguise:
+
+```python
+fields = "__all__"          # every field — including the ones added next year
+exclude = ["password"]      # every field EXCEPT today's known-dangerous ones
+```
+
+Measured against `User`: `fields = "__all__"` produces `password`, `is_superuser`, `is_staff`,
+`last_login` and `user_permissions`. But the day it is written is not the problem. The problem is
+the field somebody adds afterwards — an internal note, a soft-delete flag, a hashed token — which
+appears in the API with **no diff for a reviewer to catch**, because the exposure happens in a file
+nobody touched. An allow-list fails closed; a deny-list fails open.
+
+`tests/test_schemas.py` rejects both shortcuts anywhere under `apps/`, and pins `UserOut`'s field
+set exactly, so widening a response is a deliberate act that has to be typed out.
+
+### Partial updates: `PatchDict`
+
+```python
+@router.patch("/{user_id}", response=UserOut)
+def update_user(request, user_id: int, payload: PatchDict[UserUpdateIn]):
+    for attribute, value in payload.items():
+        setattr(user, attribute, value)
+```
+
+The view receives **only the keys the client actually sent**. That distinction is the entire reason
+it is here: with an all-optional schema, a field the client never mentioned and a field explicitly
+set to `null` arrive identically as `None`, and a loop like the one above blanks out every column
+the client did not name. An empty `PATCH` body means "change nothing", and it should.
+
+The cost is that the view receives a dict rather than a schema instance, which reads as a step
+backwards until you know why. Note also that `PatchDict[UserUpdateIn]` publishes its component under
+a **different name** — `UserUpdateInPatch` — and generated clients use the published one.
+
+### Two costs of deriving schemas from models
+
+`ModelSchema` keeps field types in step with the model, which is why it is used here. It is not
+free:
+
+- **The model's `help_text` becomes public API documentation.** Measured: `User.username`'s admin
+  help text — "Required. 150 characters or fewer…" — is the `description` of that field in the
+  published document. Help text written for the admin ships to API consumers verbatim.
+- **mypy cannot see derived fields.** `payload.username` on a `ModelSchema` is an `attr-defined`
+  error, because the fields are built by a metaclass at runtime. Use `payload.dict()` — which is
+  also how the example separates the plaintext password from the columns it constructs the model
+  from.
+
+A model field's *type* change also moves the API contract without touching the schema. That is the
+trade against hand-writing every output type, and the pinned field-set test keeps it visible.
+
+---
+
 ## How a v2 would be introduced
 
 Decided now, while nothing depends on it. Under pressure — a breaking change already required, a
@@ -260,8 +349,6 @@ renders without its assets. `TODO(M6-03)` owns making that part of the image bui
 
 Each of these arrives with its issue, and this file is where it gets written down:
 
-- **M5-03** — request and response schema conventions, and why input and output schemas stay
-  separate
 - **M5-04** — the pagination strategy applied to every list endpoint
 - **M5-05** — the single error envelope, through centralised exception handlers
 - **M5-07** — the authentication seam, deliberately a documented stub rather than an implementation

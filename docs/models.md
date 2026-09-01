@@ -243,8 +243,22 @@ table is usually the better answer: it keeps the live table clean and the questi
 
 ---
 
+## A field added here is not API surface
+
+Adding a column does not publish it. Responses are built from schemas that name their fields
+explicitly, so a new field reaches clients only when somebody adds it to a schema — which is the
+review moment the convention exists to create. That guarantee holds only as long as no schema uses
+`fields = "__all__"` or `exclude`, both of which turn the next field you add into public API with no
+diff to catch. See [api.md](api.md#response-schemas-are-allow-lists); a test enforces it.
+
+The same applies to `help_text`: through a `ModelSchema` it becomes the field's description in the
+published OpenAPI document, so it is read by API consumers as well as by admin users.
+
+---
+
 ## See also
 
+- [api.md](api.md#schemas) — how a model becomes a request and response contract
 - [migrations.md](migrations.md) — generating, reviewing, and applying schema changes safely
 - [layout.md](layout.md) — where models live and how apps are registered
 - `apps/core/models.py` and `apps/core/uuid7.py` — the implementations, commented with the reasoning

@@ -216,6 +216,11 @@ description:
 5. **Nothing secret is committed.** No credentials, tokens, or real `.env` values.
 6. **Endpoints are on an app's router, never on the API instance.** `config/api.py` mounts routers
    and defines none — see [docs/api.md](docs/api.md#routers-one-per-app).
+7. **Input and output schemas are separate types, and response schemas are allow-lists.** A shared
+   schema makes read-only fields writable and write-only fields visible. `fields = "__all__"` and
+   `exclude = [...]` are both rejected: they expose the *next* field added to the model, in a file
+   nobody touched, with no diff to review. See
+   [docs/api.md](docs/api.md#response-schemas-are-allow-lists).
 
 Reviewers ask questions to understand, not to challenge. If a comment reads as blunt, assume it is
 brevity rather than criticism — and if a review comment is unclear, ask.
