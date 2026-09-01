@@ -21,10 +21,15 @@ recorded in [ADR 0002](adr/0002-project-layout.md).
 
 | Location | Belongs here | Does **not** belong here |
 | --- | --- | --- |
-| `config/` | Settings, root URLconf, ASGI/WSGI entrypoints | Models, views, business logic |
+| `config/` | Settings, root URLconf, the API instance (`api.py`), ASGI/WSGI entrypoints | Models, views, business logic, endpoint definitions |
 | `apps/<name>/` | One cohesive feature: its models, schemas, router, admin | Anything another app must import to function |
 | `apps/core/` | Shared abstract models, mixins, common utilities | Feature-specific logic |
 | `docs/` | Architecture notes and ADRs | Anything the code needs at runtime |
+
+`config/api.py` holds the single `NinjaAPI` instance, mounted at `/api/v1/` by `config/urls.py`.
+The instance is project wiring and lives in `config/`; the routers that attach to it belong to the
+apps they serve (M5-02). **Read [api.md](api.md) before changing the URL prefix** — it is the one
+decision here that cannot be revised once a client exists.
 
 ## Settings layers
 

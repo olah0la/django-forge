@@ -74,8 +74,8 @@ the ones before it, so reordering them creates rework.
 | **M1** | Foundation & Developer Environment | A reproducible, well-governed repository | ✅ Complete |
 | **M2** | Containerization | The project builds and runs in Docker, identically for everyone | ✅ Complete |
 | **M3** | Django Project Scaffold & Configuration | A Django project with 12-factor configuration | ✅ Complete |
-| **M4** | Persistence Layer | PostgreSQL, migrations, and shared model foundations | 🚧 In progress |
-| **M5** | API Layer (Django Ninja) | A versioned, documented, consistently-erroring HTTP API | 🔜 Not started |
+| **M4** | Persistence Layer | PostgreSQL, migrations, and shared model foundations | ✅ Complete |
+| **M5** | API Layer (Django Ninja) | A versioned, documented, consistently-erroring HTTP API | 🚧 In progress |
 | **M6** | Operational Readiness | The service is safe to run under a process manager or orchestrator | 🔜 Not started |
 | **M7** | Template Consumability | The repository can actually be used as a starting point | 🔜 Not started |
 
@@ -164,6 +164,19 @@ make db-restore FILE=…  # put it back — drops and rebuilds the database firs
 `make seed` is idempotent and **development-only**: it refuses unless `settings.SEED_ENABLED` is
 true, which only the development and test layers set — in code, never from `.env`, since that file
 is read by both Compose profiles.
+
+**The API is mounted at `/api/v1/`** (M5-01), built with Django Ninja:
+
+```bash
+curl localhost:8000/api/v1/ping        # {"pong": true, "version": "1.0.0"}
+open http://localhost:8000/api/v1/docs # interactive documentation, development only
+```
+
+The version prefix is there from the first endpoint because adding one later breaks every
+integrated client at once — five characters now against a coordinated migration ever.
+[docs/api.md](docs/api.md) covers the two different version numbers that get confused, how a v2
+would run beside v1 through a deprecation window, and why the documentation is off by default in
+production. Routers per app arrive with **M5-02**.
 
 `make db-dump` and `make db-restore` (M4-06) are a **local convenience, not a backup strategy** —
 one file, on the same machine as the database it came from, protecting against your own next

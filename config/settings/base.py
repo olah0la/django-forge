@@ -96,8 +96,19 @@ DJANGO_APPS = [
 ]
 
 THIRD_PARTY_APPS: list[str] = [
-    # django-ninja needs no entry in INSTALLED_APPS; it is wired through URLs
-    # instead. M5-01 mounts the API.
+    # NOT required to route the API — django-ninja is wired through URLs
+    # (config/api.py, mounted by config/urls.py), and everything answers
+    # correctly without this entry. It is here for one reason: the interactive
+    # documentation page.
+    #
+    # Ninja checks for "ninja" in INSTALLED_APPS when rendering /api/v1/docs.
+    # Present, it renders from the 7.9 MB of Swagger UI assets bundled in the
+    # package. Absent, it falls back to a template that loads swagger-ui from
+    # cdn.jsdelivr.net — so the page breaks with no network and every developer
+    # opening it makes a request to a third party.
+    #
+    # Removing this looks safe, because the API keeps working. See docs/api.md.
+    "ninja",
 ]
 
 # Project apps. Every one lives under `apps/` and is referenced by its full
@@ -246,6 +257,38 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# --------------------------------------------------------------------------
+# API (M5)
+# --------------------------------------------------------------------------
+# Project metadata, not environment configuration: the API is called the same
+# thing wherever it runs, which is why these live in base rather than in a
+# layer. They are environment-READABLE so a derived project can rename the API
+# without editing code — a template whose name is hard-coded is a template that
+# every adopter has to patch.
+#
+# These become the OpenAPI document's `info` block, so they are what a consumer
+# reads first. API_VERSION is the DOCUMENT version and is not the `v1` in the
+# URL — config/api.py explains why the two must not be tied together.
+API_TITLE = env.str("DJANGO_API_TITLE", default="django-forge API")
+API_VERSION = env.str("DJANGO_API_VERSION", default="1.0.0")
+API_DESCRIPTION = env.str(
+    "DJANGO_API_DESCRIPTION",
+    default="HTTP API for a project forged from django-forge.",
+)
+
+# Whether /api/v1/docs and the OpenAPI schema are served.
+#
+# OFF here, so production inherits the safe value and never has to remember
+# anything — the same reasoning as SEED_ENABLED below. The docs page is a
+# complete, machine-readable description of every endpoint, parameter and
+# response shape, which is exactly what an attacker enumerating an API wants.
+#
+# UNLIKE SEED_ENABLED, the production layer does offer an environment override.
+# Seeding in production is always a mistake; published API docs are a normal
+# choice for a public API. The default is the cautious one, and turning it on
+# is deliberate rather than forbidden.
+API_DOCS_ENABLED = False
 
 # --------------------------------------------------------------------------
 # Seed data

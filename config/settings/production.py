@@ -126,6 +126,22 @@ SILENCED_SYSTEM_CHECKS: list[str] = [
     "security.W021",
 ]
 
+# --------------------------------------------------------------------------
+# API documentation
+# --------------------------------------------------------------------------
+# Base sets this False, so the default here is "no docs in production" and
+# nobody has to remember anything. The override exists because publishing API
+# documentation is a legitimate choice for a public API — unlike seeding, which
+# is always a mistake in production and therefore has no environment switch at
+# all (see SEED_ENABLED in base.py).
+#
+# What you are turning on: /api/v1/docs and /api/v1/openapi.json, a complete
+# machine-readable map of every endpoint, parameter and response shape. For an
+# internal API that is free reconnaissance for anyone who finds it. Decide
+# deliberately, and note that the docs page needs collectstatic to have run
+# (TODO(M6-03)) or it renders without its assets.
+API_DOCS_ENABLED = env.bool("DJANGO_API_DOCS_ENABLED", default=False)
+
 # PostgreSQL, from DATABASE_URL. See database_from_url() for the connection
 # reuse settings and the worker-count arithmetic that bounds them.
 DATABASES = {"default": database_from_url()}

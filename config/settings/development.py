@@ -36,3 +36,8 @@ DATABASES = {"default": database_from_url()}
 # `manage.py seed` is allowed here. See base.py for why this is a code-level
 # layer decision rather than an environment variable.
 SEED_ENABLED = True
+
+# Interactive API documentation at /api/v1/docs. On here, off in production —
+# acceptance criterion of M5-01, and the reason the docs are worth having at
+# all: an endpoint you can call from the browser while writing it.
+API_DOCS_ENABLED = True
