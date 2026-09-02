@@ -281,7 +281,12 @@ deployment would, which is what makes a production-only problem reproducible loc
 > different UID cannot write the files it mounted — this bites on Linux and not on macOS.
 
 The development stack runs Django under uvicorn with auto-reload; the production-like one runs
-the same image the way a deployment would. **M6-02** still owns putting gunicorn in front of it.
+**gunicorn supervising uvicorn workers** — the same ASGI application, served the way a deployment
+would serve it, with worker count and timeouts read from the environment. All of the tuning lives in
+one commented file, [`config/gunicorn.py`](config/gunicorn.py), and
+[docs/serving.md](docs/serving.md) explains every default and the two that are routinely misread:
+gunicorn's `timeout` does **not** bound a request, and worker count multiplies against PostgreSQL's
+connection limit.
 
 Targets tagged for milestones that have not landed are listed but not usable — running one tells you
 which file is missing and which issue delivers it, rather than failing with a raw error. The
