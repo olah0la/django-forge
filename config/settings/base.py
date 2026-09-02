@@ -291,6 +291,42 @@ API_DESCRIPTION = env.str(
 API_DOCS_ENABLED = False
 
 # --------------------------------------------------------------------------
+# Pagination (M5-04)
+# --------------------------------------------------------------------------
+# Read by django-ninja, so the names are ITS names, not ours. All four are read
+# ONCE, when `ninja.conf` is imported, and the maximum is baked into the query
+# parameter's validation at class-definition time. That means `override_settings`
+# cannot change them in a test — the same trap as the API instance in
+# config/api.py. Tests assert the real, configured behaviour instead.
+#
+# Not environment-readable: a page ceiling is a property of the API's contract,
+# published in the OpenAPI document, and one stray environment variable should
+# not be able to move it. See docs/api.md.
+NINJA_PAGINATION_CLASS = "ninja.pagination.LimitOffsetPagination"
+
+# What a client gets when it asks for no particular size.
+NINJA_PAGINATION_PER_PAGE = 25
+
+# THE LOAD-BEARING LINE. Ninja's default for this is `inf` — with no value here,
+# `?limit=1000000` is a valid request and the endpoint tries to serve it, which
+# is precisely the failure pagination exists to prevent. Requests above the
+# ceiling are REFUSED with 422 rather than quietly clamped: a client that
+# believes it received 1,000 rows and received 100 will page through the data
+# wrongly and never know.
+NINJA_PAGINATION_MAX_LIMIT = 100
+
+# The same ceiling for the other paginators. Nothing reads it today —
+# LimitOffsetPagination uses MAX_LIMIT above — and it is set so that switching
+# to PageNumberPagination or CursorPagination inherits a limit instead of
+# silently losing one.
+#
+# The missing `PAGINATION_` in the name is NOT a typo here: Ninja's alias for
+# this setting really is `NINJA_MAX_PER_PAGE_SIZE`, alone among the four.
+# "Correcting" it to NINJA_PAGINATION_MAX_PER_PAGE_SIZE means Ninja never reads
+# it, and nothing fails — the ceiling just quietly reverts to the default.
+NINJA_MAX_PER_PAGE_SIZE = 100
+
+# --------------------------------------------------------------------------
 # Seed data
 # --------------------------------------------------------------------------
 # `manage.py seed` refuses to run unless this is True. OFF here, so production

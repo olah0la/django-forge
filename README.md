@@ -201,10 +201,23 @@ class UserOut(ModelSchema):          # what the API will say back
 ```
 
 `apps/core/schemas.py` is the worked example, with no endpoints attached on purpose: authentication
-is still a stub (M5-07). [docs/api.md](docs/api.md) covers the naming convention, why the
-directions stay separate, partial updates with `PatchDict`, the prefix and tag conventions, the two
-different version numbers that get confused, how a v2 would run beside v1 through a deprecation
-window, and why the documentation is off by default in production.
+is still a stub (M5-07).
+
+**Every list endpoint is paginated, and none of them contain pagination code** (M5-04). App routers
+are `RouterPaginated`, so any endpoint whose response is a collection gets the parameters, the
+ceiling and the envelope:
+
+```bash
+curl "localhost:8000/api/v1/things?limit=25&offset=50"   # {"items": [...], "count": 1240}
+curl "localhost:8000/api/v1/things?limit=1000000"        # 422 — the ceiling is 100, and refused
+```
+
+Django Ninja's own maximum page size is `inf`, which is the bug that setting exists to fix.
+[docs/api.md](docs/api.md) covers the schema naming convention, why the directions stay separate,
+partial updates with `PatchDict`, the measured cost of deep offsets and of `count`, when to move to
+cursor pagination, the prefix and tag conventions, the two different version numbers that get
+confused, how a v2 would run beside v1 through a deprecation window, and why the documentation is
+off by default in production.
 
 `make db-dump` and `make db-restore` (M4-06) are a **local convenience, not a backup strategy** —
 one file, on the same machine as the database it came from, protecting against your own next

@@ -15,6 +15,9 @@ have to know which shape an app is in.
 config imports apps. Reaching back the other way creates an import cycle that
 surfaces as a confusing failure at startup rather than where it was written.
 
+Routers are `RouterPaginated` (M5-04), so a list endpoint is paginated whether
+or not its author remembered to ask.
+
 `core` is the one router mounted at the API root rather than behind a prefix —
 `/api/v1/ping`, not `/api/v1/core/ping`. Meta endpoints answer for the API as a
 whole and are not a resource collection. Feature apps always take a prefix; see
@@ -23,12 +26,17 @@ docs/api.md, which also explains why that exception is not extended.
 
 from django.conf import settings
 from django.http import HttpRequest
-from ninja import Router
+from ninja.pagination import RouterPaginated
 
+# `RouterPaginated`, not `Router` — the convention for every app router here.
+# It paginates any operation whose `response=` is a collection, so a list
+# endpoint cannot be shipped unpaginated by forgetting a decorator. Endpoints
+# that return a single object, like `ping` below, are untouched.
+#
 # Tagged once, here, rather than on each endpoint. Every operation on the router
 # inherits it, so the OpenAPI document groups them together and no endpoint can
 # be added untagged by forgetting a decorator argument.
-router = Router(tags=["meta"])
+router = RouterPaginated(tags=["meta"])
 
 
 @router.get("/ping", summary="Liveness of the API layer")

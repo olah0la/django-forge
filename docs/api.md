@@ -5,8 +5,9 @@ The two solve similar problems very differently, and **patterns copied from DRF 
 do not apply here** — there are no serializers, no viewsets, no DRF permission classes.
 
 This document grows through M5. What exists today is the versioned instance, the
-[router-per-app pattern](#routers-one-per-app), the [schema conventions](#schemas), and the
-documentation page; [what is still owed](#what-m5-still-owes-this-document) is listed at the bottom.
+[router-per-app pattern](#routers-one-per-app), the [schema conventions](#schemas),
+[pagination](#pagination), and the documentation page;
+[what is still owed](#what-m5-still-owes-this-document) is listed at the bottom.
 
 ```bash
 make up
@@ -61,13 +62,13 @@ Endpoints are **never** defined on the API instance. Each app declares a router 
 
 ```python
 # apps/billing/api.py
-from ninja import Router
+from ninja.pagination import RouterPaginated
 
-router = Router(tags=["billing"])          # tagged once, here — not per endpoint
+router = RouterPaginated(tags=["billing"])   # tagged once, here — not per endpoint
 
-@router.get("/invoices")
-def list_invoices(request: HttpRequest) -> list[dict]:
-    ...
+@router.get("/invoices", response=list[InvoiceOut])
+def list_invoices(request: HttpRequest):
+    return Invoice.objects.order_by("id")    # paginated automatically — see below
 ```
 
 ```python
@@ -92,6 +93,7 @@ app's own router — and adding an app costs one line in `ROUTERS`.
 | | Convention | Why |
 | --- | --- | --- |
 | Location | `apps/<name>/api.py`, a module-level object named `router` | One place to look, in every app, forever |
+| Base class | `RouterPaginated`, not `Router` | A list endpoint is [paginated](#pagination) without anyone remembering to ask |
 | Prefix | The app's resource name, no slashes: `"billing"` | Ninja joins it to the mount point |
 | Tags | Exactly one, named for the app, set on the `Router` | Groups the app in the docs page; cannot be forgotten per endpoint |
 | Direction | `config/` imports apps; **an app never imports `config.api`** | The reverse is an import cycle that fails confusingly at startup |
@@ -250,6 +252,103 @@ trade against hand-writing every output type, and the pinned field-set test keep
 
 ---
 
+## Pagination
+
+**Every list endpoint is paginated, and none of them contain pagination code.** App routers are
+`RouterPaginated`, which injects the parameters, the ceiling and the envelope into any operation
+whose `response=` is a collection. There is no decorator to forget, which is the point: the failure
+mode of opt-in pagination is a 200 response carrying half a million rows, and it looks like success.
+
+```http
+GET /api/v1/things?limit=25&offset=50
+```
+
+```json
+{
+  "items": [ ... ],
+  "count": 1240
+}
+```
+
+`count` is the size of the whole result set, not of the page. The envelope is Ninja's own and is
+identical on every endpoint, because nothing here subclasses it.
+
+### The numbers, and what happens at the ceiling
+
+| | Value | Set in |
+| --- | --- | --- |
+| Default page size | **25** | `NINJA_PAGINATION_PER_PAGE` |
+| Maximum page size | **100** | `NINJA_PAGINATION_MAX_LIMIT` |
+
+Ninja's own default for that maximum is **`inf`**. Without the setting, `?limit=1000000` is a valid
+request that the endpoint will try to serve — the precise failure pagination exists to prevent.
+
+A request above the ceiling is **refused with 422**, not clamped. Clamping looks kinder and is
+worse: a client that asked for 1,000 rows, believes it received 1,000 and actually received 100 will
+page through the data wrongly and never see an error. The limit is published in the OpenAPI document
+(`maximum: 100`), so a client can read it rather than discover it by being rejected.
+
+These settings are read **once, at import**, and the maximum is baked into the query parameter's
+validation when the class is defined. `override_settings` cannot move them in a test — the same trap
+as the API instance in `config/api.py`.
+
+### `ORDER BY` is load-bearing
+
+```python
+return Thing.objects.order_by("id")     # not Thing.objects.all()
+```
+
+Offset pagination over an unordered queryset is **undefined**. PostgreSQL is free to return rows in
+a different order between two requests, so page 2 repeats rows from page 1 and omits others, with
+nothing raising and no error to see. It is invisible in development, where the table is small enough
+that the plan never changes.
+
+The ordering key must be a **deterministic total order** — which a UUIDv7 primary key is. It is
+*not* insertion order: v7 is time-sortable only to the millisecond, and rows written within the same
+millisecond come back in an arbitrary (but stable) order. For chronological ordering with a
+guaranteed tiebreak, use `order_by("created_at", "id")`.
+
+### What offset pagination costs, measured
+
+100,000 rows on the PostgreSQL 17.6 in this stack, `ORDER BY id LIMIT 25`, best of seven:
+
+| Offset | Rows the database reads | Buffers | Time |
+| --- | --- | --- | --- |
+| 0 | 25 | 4 | **0.45 ms** |
+| 1,000 | 1,025 | 17 | 0.61 ms |
+| 10,000 | — | — | 1.55 ms |
+| 50,000 | — | — | 6.11 ms |
+| 99,000 | 99,025 | 1,486 | **11.21 ms** |
+
+The mechanism is visible in the row counts, taken from `EXPLAIN (ANALYZE, BUFFERS)`: the database
+reads `offset + limit` rows and throws the first `offset` away. Cost grows linearly with depth
+forever — 25× here between the first page and the last, and it keeps going as the table does.
+
+**The `count` is not free either.** `SELECT COUNT(*)` over those 100,001 rows took **5.81 ms**
+against **0.54 ms** for the page beside it — roughly 11× the cost of the data the client asked for,
+on every request. PostgreSQL has no cached row count; it scans. If that becomes the bottleneck
+before depth does, an approximate count from `pg_class.reltuples` is the usual answer.
+
+### Moving to cursor pagination
+
+**The trigger:** deep offsets appearing in production traffic (clients paging past a few thousand
+rows), or clients reporting duplicated and missing rows while paging a table that is being written
+to concurrently. Offset pagination has no answer to the second problem at all — rows shift between
+pages as data changes underneath a traversal.
+
+Ninja ships `CursorPagination`, so the switch is `NINJA_PAGINATION_CLASS`. Two things make it a
+**breaking change** rather than a configuration change:
+
+- The envelope becomes `{"previous": ..., "next": ..., "results": [...]}` — a different key for the
+  items, and no total count.
+- Page numbers disappear. A client cannot jump to page N, only forward and backward from a cursor.
+
+So it belongs at a version boundary — a v2 running beside v1, as described below. UUIDv7 primary
+keys make the underlying keyset query straightforward, which is why entry 43's choice was worth
+making early.
+
+---
+
 ## How a v2 would be introduced
 
 Decided now, while nothing depends on it. Under pressure — a breaking change already required, a
@@ -349,7 +448,6 @@ renders without its assets. `TODO(M6-03)` owns making that part of the image bui
 
 Each of these arrives with its issue, and this file is where it gets written down:
 
-- **M5-04** — the pagination strategy applied to every list endpoint
 - **M5-05** — the single error envelope, through centralised exception handlers
 - **M5-07** — the authentication seam, deliberately a documented stub rather than an implementation
 

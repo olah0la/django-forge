@@ -19,20 +19,40 @@ tests/testapp/urls.py mounts them on an instance of their own.
 """
 
 from django.contrib.auth.models import User
+from django.db.models import QuerySet
 from django.http import HttpRequest
 from django.shortcuts import get_object_or_404
 from ninja import PatchDict, Router
+from ninja.pagination import RouterPaginated
 
 from apps.core.schemas import UserCreateIn, UserOut, UserUpdateIn
+from tests.testapp.models import Thing
+from tests.testapp.schemas import ThingOut
 
-# The convention a feature app follows: one tag, named for the app, set on the
-# router so every operation inherits it.
-router = Router(tags=["things"])
+# The convention a feature app follows: `RouterPaginated`, and one tag named for
+# the app, set on the router so every operation inherits it.
+router = RouterPaginated(tags=["things"])
 
 
-@router.get("/", summary="List things")
-def list_things(request: HttpRequest) -> list[dict]:
-    return [{"label": "a thing"}]
+@router.get("/", response=list[ThingOut], summary="List things")
+def list_things(request: HttpRequest) -> QuerySet[Thing]:
+    """A list endpoint with no pagination code in it (M5-04).
+
+    `RouterPaginated` sees a collection `response=` and injects the `limit` and
+    `offset` parameters, the ceiling, and the `{items, count}` envelope. There
+    is no decorator to forget.
+
+    ORDER BY IS LOAD-BEARING. Offset pagination over an unordered queryset is
+    undefined — PostgreSQL may return rows in any order it likes between two
+    requests, so page 2 can repeat rows from page 1 and omit others entirely,
+    with nothing raising.
+
+    A UUIDv7 primary key gives a deterministic TOTAL order, which is what
+    pagination requires. It is chronological only to the millisecond — rows
+    written in the same millisecond come back in an arbitrary (but stable)
+    order, so this is not insertion order. See docs/models.md.
+    """
+    return Thing.objects.order_by("id")
 
 
 # ---------------------------------------------------------------------------

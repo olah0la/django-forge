@@ -221,6 +221,10 @@ description:
    `exclude = [...]` are both rejected: they expose the *next* field added to the model, in a file
    nobody touched, with no diff to review. See
    [docs/api.md](docs/api.md#response-schemas-are-allow-lists).
+8. **List endpoints are paginated *and* ordered.** `RouterPaginated` handles the first, as long as
+   the response is a collection type; the second is yours — offset pagination over an unordered
+   queryset silently repeats and drops rows. See
+   [docs/api.md](docs/api.md#order-by-is-load-bearing).
 
 Reviewers ask questions to understand, not to challenge. If a comment reads as blunt, assume it is
 brevity rather than criticism — and if a review comment is unclear, ask.
