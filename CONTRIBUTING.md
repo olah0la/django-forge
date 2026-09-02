@@ -214,14 +214,17 @@ description:
 3. **The change matches the issue's scope** — unrelated improvements belong in their own issue.
 4. **A newcomer could understand it.** Comments explain *why*, not *what*.
 5. **Nothing secret is committed.** No credentials, tokens, or real `.env` values.
-6. **Endpoints are on an app's router, never on the API instance.** `config/api.py` mounts routers
+6. **Nothing secret is *logged*.** A new log call must not pass a request body, a query string, or
+   an unfiltered dictionary. If a mapping has to be logged, put it through `redact_mapping()`. See
+   [docs/logging.md](docs/logging.md#what-is-never-logged-and-how).
+7. **Endpoints are on an app's router, never on the API instance.** `config/api.py` mounts routers
    and defines none — see [docs/api.md](docs/api.md#routers-one-per-app).
-7. **Input and output schemas are separate types, and response schemas are allow-lists.** A shared
+8. **Input and output schemas are separate types, and response schemas are allow-lists.** A shared
    schema makes read-only fields writable and write-only fields visible. `fields = "__all__"` and
    `exclude = [...]` are both rejected: they expose the *next* field added to the model, in a file
    nobody touched, with no diff to review. See
    [docs/api.md](docs/api.md#response-schemas-are-allow-lists).
-8. **List endpoints are paginated *and* ordered.** `RouterPaginated` handles the first, as long as
+9. **List endpoints are paginated *and* ordered.** `RouterPaginated` handles the first, as long as
    the response is a collection type; the second is yours — offset pagination over an unordered
    queryset silently repeats and drops rows. See
    [docs/api.md](docs/api.md#order-by-is-load-bearing).

@@ -53,6 +53,15 @@ else:
 # wrong for tests, where it dominates the runtime of anything creating a user.
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 
+# Readable, because the only person who sees this output is a developer reading
+# a failure. pytest captures log output and prints it for failing tests only,
+# so this costs nothing on a green run.
+#
+# The JSON format is exercised by building the formatter directly in
+# tests/test_logging.py, and the per-layer defaults are asserted by importing
+# each layer in a subprocess — neither needs this layer to be JSON.
+LOGGING = build_logging("console")  # noqa: F405
+
 EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
 
 # Enabled so the seed command's own tests can call it. The guard itself is

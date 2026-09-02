@@ -323,6 +323,24 @@ created/updated timestamps, which most models in a derived project should inheri
 choice, the timestamp write that silently skips `updated_at`, and the soft-deletion pattern — which
 is documented deliberately rather than shipped.
 
+## Logging
+
+`apps/core/logging.py` holds the formatters, the correlation filter and the redaction helpers;
+`apps/core/middleware.py` holds the middleware that gives each request its identifier and logs it.
+`config/settings/base.py` assembles them with `build_logging()`, which each settings layer calls
+with the format that layer wants.
+
+Two constraints that are not obvious from the files:
+
+- **`apps/core/logging.py` may import nothing but the standard library.** Django configures logging
+  *before* the app registry is populated, so that module is imported while `apps.populate()` has not
+  run — an import that reaches a model fails at startup.
+- **`RequestIDMiddleware` belongs first in `MIDDLEWARE`.** Middleware wraps in list order, so
+  anything above it logs uncorrelated lines.
+
+**[logging.md](logging.md)** covers the two formats, the `X-Request-ID` contract, and the four
+controls that keep passwords and tokens out of the log.
+
 ## Why `apps/core/` is an app, not a plain package
 
 It could have been a loose `shared/` package, but shared code here will include **abstract base

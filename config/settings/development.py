@@ -7,7 +7,7 @@ only by DJANGO_SETTINGS_MODULE=config.settings.development.
 from django.core.management.utils import get_random_secret_key
 
 from .base import *  # noqa: F403
-from .base import database_from_url, env
+from .base import build_logging, database_from_url, env
 
 # Typed, so the literal string "False" becomes False rather than a truthy
 # non-empty string. Defaults to on: this layer is never deployed.
@@ -28,6 +28,15 @@ ALLOWED_HOSTS = env.list(
 # Email goes to the console rather than anywhere real, so a stray send during
 # development cannot reach an actual person.
 EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+
+# Human-readable logs, because a person is reading them.
+#
+# THE OVERRIDE IS THE POINT. Running two formats means the one that matters is
+# the one nobody looks at until it is deployed — the cost this project accepted
+# knowingly. `DJANGO_LOG_FORMAT=json make up` shows production's exact output
+# on a laptop, which is how a formatting bug gets found before it ships rather
+# than during an incident. See docs/logging.md.
+LOGGING = build_logging(env.str("DJANGO_LOG_FORMAT", default="console"))
 
 # PostgreSQL, from DATABASE_URL. See database_from_url() for the connection
 # reuse settings and the worker-count arithmetic that bounds them.

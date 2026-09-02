@@ -220,6 +220,24 @@ cursor pagination, the prefix and tag conventions, the two different version num
 confused, how a v2 would run beside v1 through a deprecation window, and why the documentation is
 off by default in production.
 
+**Logs are JSON in production and prose in development, and every line of one request carries the
+same identifier** (M6-04). A middleware takes that identifier from an inbound `X-Request-ID` header
+when there is one — which is what lets a request be followed across services — generates a UUIDv7
+when there is not, and returns it on every response:
+
+```console
+{"timestamp": "2026-09-02T13:39:58.568Z", "level": "INFO", "logger": "apps.request",
+ "message": "POST /api/v1/things 500", "request_id": "01a06259-0db6-7239-bcd3-a8e7f9d542d3",
+ "method": "POST", "path": "/api/v1/things", "status": 500, "duration_ms": 49.25}
+```
+
+`DJANGO_LOG_LEVEL` sets the level and `DJANGO_LOG_FORMAT=json make up` previews production's exact
+output on a laptop. Passwords and tokens never reach the log, and that is *tested* rather than
+assumed: the JSON formatter publishes an allow-list of fields, because Django attaches the live
+request — query string and all — to the records it emits for a 500.
+[docs/logging.md](docs/logging.md) has the header contract, the four controls that keep secrets out,
+and the two things in that configuration not to "fix".
+
 `make db-dump` and `make db-restore` (M4-06) are a **local convenience, not a backup strategy** —
 one file, on the same machine as the database it came from, protecting against your own next
 command and nothing else. [docs/backups.md](docs/backups.md) has the verified round trip and, more
