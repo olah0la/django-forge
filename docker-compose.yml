@@ -95,8 +95,11 @@ services:
       DJANGO_SETTINGS_MODULE: "config.settings.development"
 
       # The entrypoint (M2-05) waits for this to accept queries before starting
-      # the application. Django itself does NOT read it yet — M4-02 wires
-      # settings to it; until then the app still uses SQLite.
+      # the application, and since M4-02 the settings layers build DATABASES
+      # from it — with no fallback, so a service without it does not start.
+      #
+      # app-prod declares its own `environment:` and therefore has to REPEAT
+      # this; see the note there before adding anything here.
       DATABASE_URL: "postgresql://${POSTGRES_USER:-forge}:${POSTGRES_PASSWORD:-forge}@db:5432/${POSTGRES_DB:-forge}"
 
     ports:
@@ -134,6 +137,14 @@ services:
     # launch path reports health identically and `docker compose ps` shows a
     # STATUS of "(healthy)". Override here only if dev and prod ever need
     # genuinely different probes.
+    #
+    # Since M6-01 it is a real request to /readyz — READINESS, so "(healthy)"
+    # here means "can serve traffic", which is what `condition: service_healthy`
+    # is used to gate on. Stopping the database therefore turns this container
+    # unhealthy; Docker does NOT restart it for that, and it recovers by itself
+    # when the database comes back. Under an orchestrator, wire livenessProbe to
+    # /healthz and readinessProbe to /readyz — pointing liveness at /readyz turns
+    # a database outage into a restart loop. See docs/ops.md.
     #
     # --- development server --------------------------------------------------
     # uvicorn serves config/asgi.py, so development uses the SAME interface as
@@ -253,6 +264,23 @@ services:
       # too — the check lives in the Makefile's up-prod target instead.
       DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:-}"
       DJANGO_ALLOWED_HOSTS: "${DJANGO_ALLOWED_HOSTS:-}"
+
+      # REPEATED FROM app-base, and it has to be.
+      #
+      # `<<: *app-base` is a YAML merge key, not a deep merge: a key present in
+      # this mapping REPLACES the anchor's entirely. Declaring `environment`
+      # here therefore discards every variable app-base sets, and the ones above
+      # are all this service would get.
+      #
+      # That is not hypothetical. This service had no DATABASE_URL from the
+      # moment M4-02 made settings require one, and `make up-prod` crash-looped
+      # on ImproperlyConfigured — found in M6-01 while verifying the health
+      # check against the production profile, because a container that cannot
+      # start is a container that cannot report healthy. A test in
+      # tests/test_health.py now pins it.
+      #
+      # Anything added to app-base's environment has to be added here too.
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-forge}:${POSTGRES_PASSWORD:-forge}@db:5432/${POSTGRES_DB:-forge}"
 
     ports:
       # A different host port on purpose, so starting this stack while the

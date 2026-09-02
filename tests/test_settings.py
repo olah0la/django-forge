@@ -83,7 +83,13 @@ def test_allowed_hosts_parses_as_a_list(load_settings):
         "{'hosts': settings.ALLOWED_HOSTS}",
     )
     assert rc == 0, err
-    assert json.loads(out)["hosts"] == ["a.example.com", "b.example.com"]
+    hosts = json.loads(out)["hosts"]
+
+    # The operator's hosts, split and stripped, in the order given. Loopback is
+    # appended by the production layer for the health probe (M6-01) and is
+    # asserted separately in tests/test_health.py — this test is about the
+    # parsing, so it slices the appended entries off rather than pinning them.
+    assert hosts[:2] == ["a.example.com", "b.example.com"]
 
 
 # ---------------------------------------------------------------------------
@@ -332,6 +338,39 @@ def test_database_healthcheck_passes_the_user_flag():
     and reports a healthy database as failing."""
     compose = _compose()
     assert "pg_isready -U" in compose
+
+
+def test_every_service_that_runs_django_gets_a_database_url():
+    """`<<: *app-base` is a YAML merge key, NOT a deep merge.
+
+    A service that declares its own `environment:` replaces the anchor's
+    entirely. app-prod does, so it silently lost DATABASE_URL the moment M4-02
+    made settings require one — and crash-looped on ImproperlyConfigured with
+    nothing in `make ps` to suggest why. Found in M6-01 while verifying the
+    health check against the production profile.
+
+    Sliced per service rather than searched over the whole file: one occurrence
+    anywhere would keep this green while the service that needs it has none,
+    which is precisely the bug.
+
+    Matched as a YAML KEY (`DATABASE_URL:`) rather than as a bare name, because
+    the comment explaining all of this mentions DATABASE_URL in prose — and the
+    first version of this test passed on that comment alone.
+    """
+    compose = _compose()
+
+    for name in ("app", "app-prod"):
+        start = compose.index(f"\n  {name}:\n")
+        # To the next service, or the next top-level key, or the end of file.
+        rest = compose[start + len(f"\n  {name}:\n") :]
+        end = re.search(r"^(?:  \S+:|\S)", rest, re.M)
+        block = rest[: end.start()] if end else rest
+
+        assert re.search(r"^\s+DATABASE_URL:", block, re.M), (
+            f"{name} sets no DATABASE_URL and will not start. "
+            "A service declaring `environment:` replaces app-base's entirely, "
+            "so it must repeat everything the anchor sets."
+        )
 
 
 def test_database_credentials_are_not_hardcoded():

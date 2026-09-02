@@ -43,9 +43,11 @@ router = RouterPaginated(tags=["meta"])
 def ping(request: HttpRequest) -> dict:
     """Confirm the API is mounted and answering.
 
-    NOT a health check. M6-01 owns readiness and liveness endpoints, and those
-    have to answer for the database and any other dependency. This answers for
-    exactly one thing: that routing reached django-ninja.
+    NOT a health check. `/healthz` and `/readyz` (apps/core/health.py) are the
+    health endpoints, they live outside /api/v1/ because a probe URL is an
+    infrastructure contract rather than an API one, and readiness answers for
+    the database. This answers for exactly one thing: that routing reached
+    django-ninja. Do not point a probe at it — see docs/ops.md.
 
     The version is read from settings rather than from the API instance, since
     this module does not import `config.api`. It is the OpenAPI *document*

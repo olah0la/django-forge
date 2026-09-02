@@ -15,7 +15,8 @@ the start of every project.
 > `make up` starts Django on <http://localhost:8000>, backed by PostgreSQL. What exists today is a
 > governed repository with locked dependencies (**M1**), a containerized stack with two profiles
 > (**M2**), a Django project with layered 12-factor settings (**M3**), and the persistence layer —
-> PostgreSQL, a migration workflow, and shared base models (**M4**, in progress). Still ahead: the API layer (**M5**), operational readiness (**M6**), and
+> PostgreSQL, a migration workflow, and shared base models (**M4**). The versioned API layer
+> (**M5**) and operational readiness (**M6**) are both in progress. Still ahead:
 > the template tooling that makes this consumable as a starting point (**M7**) — a backlog of 40
 > issues tracked in [GitHub Milestones](https://github.com/olah0la/django-forge/milestones) and
 > [Issues](https://github.com/olah0la/django-forge/issues).
@@ -76,7 +77,7 @@ the ones before it, so reordering them creates rework.
 | **M3** | Django Project Scaffold & Configuration | A Django project with 12-factor configuration | ✅ Complete |
 | **M4** | Persistence Layer | PostgreSQL, migrations, and shared model foundations | ✅ Complete |
 | **M5** | API Layer (Django Ninja) | A versioned, documented, consistently-erroring HTTP API | 🚧 In progress |
-| **M6** | Operational Readiness | The service is safe to run under a process manager or orchestrator | 🔜 Not started |
+| **M6** | Operational Readiness | The service is safe to run under a process manager or orchestrator | 🚧 In progress |
 | **M7** | Template Consumability | The repository can actually be used as a starting point | 🔜 Not started |
 
 Live status, full scope, and exit criteria for each milestone live in
@@ -253,9 +254,22 @@ the image exactly as built. See [CONTRIBUTING.md](CONTRIBUTING.md) for the detai
 Every container reports a **health status**, so `make ps` shows `Up 20 seconds (healthy)` rather
 than just `Up`. The database's check confirms it accepts connections, and the app waits on that
 `condition: service_healthy` rather than a bare dependency — which removes a whole class of
-intermittent startup failures. The app's own check proves its runtime is intact; it does *not* yet
-prove it can serve traffic, because **M6-01** replaces the probe with a request to the readiness
-endpoint.
+intermittent startup failures. The app's check is a real request to its own readiness endpoint, so
+"healthy" means it can actually serve.
+
+The application answers the two questions a platform asks separately, because conflating them
+causes outages:
+
+```bash
+curl localhost:8000/healthz   # {"status": "alive"} — liveness: restart me, or not?
+curl localhost:8000/readyz    # {"status": "ready"} — readiness: send me traffic, or not?
+```
+
+`/healthz` touches nothing; `/readyz` verifies the database and returns **503** when it is
+unreachable. Stop the database and the difference is visible immediately: readiness fails, liveness
+does not. Neither is authenticated, neither discloses why it failed, and both are kept out of the
+request log. [docs/ops.md](docs/ops.md) covers the distinction, how to wire it to Kubernetes, and
+the two production settings that silently break probes if you do not know about them.
 
 Development is the default profile, so a bare `docker compose up` starts it with no flag. The
 production-like profile is opt-in and must name its service:
@@ -314,7 +328,7 @@ sound.
 | **12-factor configuration** | The principle that anything differing between environments — credentials, hostnames, log levels — comes from *environment variables*, not from code. It is what lets the exact same built image be promoted from staging to production. |
 | **ASGI / WSGI** | The interfaces between a web server and a Python application. WSGI handles one request per worker at a time; ASGI additionally supports asynchronous views and long-lived connections. |
 | **Migration** | A versioned, ordered description of a database schema change. Django generates them from your model changes. They are also the most common cause of serious production incidents — an operation that is instant on 50 local rows can lock a 50-million-row table. |
-| **Liveness vs. readiness** | Two different questions an orchestrator asks. *Liveness*: "is this process healthy, or should I restart it?" *Readiness*: "should I send it traffic right now?" A container still opening its database connections is alive but not ready — conflating the two causes outages. The `HEALTHCHECK` in the Dockerfile is the *container-level* answer; **M6-01** adds the *application-level* one as HTTP endpoints. |
+| **Liveness vs. readiness** | Two different questions an orchestrator asks. *Liveness*: "is this process healthy, or should I restart it?" *Readiness*: "should I send it traffic right now?" A container still opening its database connections is alive but not ready — conflating the two causes outages. Served here as `/healthz` and `/readyz`, deliberately outside `/api/v1/`: a probe URL is an infrastructure contract, not an API one. See [docs/ops.md](docs/ops.md). |
 | **Error envelope** | A single documented JSON shape used for every error the API returns. Without one, clients must handle a different shape per error type, and will get at least one of them wrong. |
 | **Correlation ID** | A unique value attached to every log line produced while handling one request, so those lines can be reassembled from logs interleaved across many concurrent requests. |
 | **Graceful shutdown** | Finishing in-flight requests when the platform sends `SIGTERM`, instead of dropping them. Containers are stopped on every deploy, so an app that ignores `SIGTERM` drops requests on every release. |

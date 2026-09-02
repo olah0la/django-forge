@@ -8,12 +8,14 @@ recorded in [ADR 0002](adr/0002-project-layout.md).
 ├── manage.py            Django's entry point
 ├── config/              project configuration — no business logic
 │   ├── settings.py      settings (M3-02 splits this into a package)
-│   ├── urls.py          root URLconf; mounts the API, defines no routes itself
+│   ├── urls.py          root URLconf; mounts the API and the health probes
+│   ├── logging.py       filters referenced by the LOGGING dict
 │   ├── asgi.py          ASGI entrypoint (M3-04 configures it properly)
 │   └── wsgi.py          WSGI entrypoint
 ├── apps/                every application lives here
 │   └── core/            shared, cross-cutting code
 │       ├── api.py       the app's django-ninja router — one per app
+│       ├── health.py    liveness and readiness views
 │       └── models.py    shared abstract base models
 ├── docs/                documentation, including ADRs
 └── tests/               test suite (arrives with the quality-gates phase)
@@ -34,6 +36,20 @@ apps they serve. It **defines no endpoints itself** — it is a mounting table �
 runs one way: `config/` imports app routers, and an app never imports `config.api`.
 **Read [api.md](api.md) before changing the URL prefix** — it is the one decision here that cannot
 be revised once a client exists.
+
+### The two exceptions in the root URLconf
+
+`config/urls.py` carries exactly two things that are not the API mount: the admin, and the health
+probes (`/healthz`, `/readyz`). Both are project wiring rather than application endpoints, which is
+why they sit beside the API mount instead of inside a router.
+
+The views themselves live in `apps/core/health.py`, because they are code and code belongs in an
+app — but their **URLs** are deliberately outside `/api/v1/`. A probe URL is an infrastructure
+contract, held by Dockerfiles and orchestrator manifests; the API prefix is a contract boundary for
+API clients, and a future v2 must not be able to move a path that deployments depend on. See
+[ops.md](ops.md).
+
+This is not an invitation to add a third. Feature endpoints go in a router.
 
 ## Settings layers
 

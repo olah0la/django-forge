@@ -72,6 +72,7 @@ def require(name: str) -> str:
         )
     return value
 
+
 # --------------------------------------------------------------------------
 # Security
 # --------------------------------------------------------------------------
@@ -342,3 +343,109 @@ NINJA_MAX_PER_PAGE_SIZE = 100
 #
 # A layer sets this in code or it does not get it.
 SEED_ENABLED = False
+
+# --------------------------------------------------------------------------
+# Health checks (M6-01)
+# --------------------------------------------------------------------------
+# The two probe paths, written down ONCE. Three other things derive from this
+# tuple — the URLconf, the SSL-redirect exemption below, and the access-log
+# filter — so the paths cannot drift apart between them.
+#
+# Deliberately NOT under /api/v1/. A probe URL is an infrastructure contract
+# consumed by Docker and orchestrators; the API prefix is a contract boundary
+# for API clients, and a future v2 must not be able to move a path that lives in
+# deployment manifests. See apps/core/health.py and docs/ops.md.
+#
+# Not environment-readable: an orchestrator's probe configuration and this
+# tuple have to agree, and a stray variable that silently 404s every probe would
+# take the whole service out of rotation.
+HEALTH_CHECK_PATHS = ("/healthz", "/readyz")
+
+# Probes reach the application over PLAIN HTTP from inside the container, so
+# with SECURE_SSL_REDIRECT on they would receive a 301 to https:// and the
+# container would report permanently unhealthy — a failure that looks exactly
+# like a broken application and is not.
+#
+# Here rather than in production.py: any layer that ever turns the redirect on
+# needs the exemption, and it is inert wherever the redirect is off.
+#
+# Django matches these against the path WITHOUT its leading slash, and they are
+# anchored so nothing else can be caught by them.
+SECURE_REDIRECT_EXEMPT = [rf"^{path.lstrip('/')}$" for path in HEALTH_CHECK_PATHS]
+
+# --------------------------------------------------------------------------
+# Logging (M6-01; TODO(M6-04) makes it structured)
+# --------------------------------------------------------------------------
+# Deliberately minimal. This exists for ONE acceptance criterion — the health
+# endpoints are excluded from request logging — and M6-04 grows it into the real
+# configuration: JSON in production, human-readable in development, a
+# correlation identifier on every request-scoped line, and a level read from the
+# environment.
+#
+# WHY IT TAKES OWNERSHIP OF `uvicorn.access` INSTEAD OF ONLY ADDING A FILTER.
+# dictConfig clears a named logger's existing handlers, so an entry declaring
+# only `filters` would remove uvicorn's own handler and silence access logging
+# completely — passing the criterion by deleting the log. The handler is
+# therefore declared here explicitly.
+#
+# The ordering that makes this work: uvicorn configures logging when its Config
+# is built, THEN imports config/asgi.py, which calls django.setup() and applies
+# this dict. Ours runs last and wins.
+#
+# What is lost, knowingly: uvicorn's colourised "INFO:" prefix. The record's
+# message already carries client, method, path, version and status, which is the
+# whole line. M6-04 replaces this formatter with a JSON one anyway.
+#
+# TODO(M6-02): gunicorn emits its own access log through `gunicorn.access`. The
+# same filter has to be pointed at that logger, or the probes reappear in
+# production the moment gunicorn lands.
+LOGGING = {
+    "version": 1,
+    # Never True. It would disable every logger configured before this dict is
+    # applied — which, under uvicorn, is all of them.
+    "disable_existing_loggers": False,
+    "filters": {
+        "suppress_health_checks": {
+            "()": "config.logging.SuppressHealthCheckAccessLogs",
+        },
+    },
+    "formatters": {
+        "access": {"format": "%(message)s"},
+    },
+    "handlers": {
+        # stdout, not stderr: an access log is not an error stream, and
+        # container platforms collect both.
+        "access": {
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stdout",
+            "formatter": "access",
+            "filters": ["suppress_health_checks"],
+        },
+    },
+    "loggers": {
+        "uvicorn.access": {
+            "handlers": ["access"],
+            "level": "INFO",
+            # Otherwise every access line is emitted twice: once here and once
+            # by the root logger.
+            "propagate": False,
+        },
+        # The non-obvious half of the criterion, found by running the server and
+        # reading the log rather than by reasoning about it. Django logs every
+        # 4xx and 5xx through `django.request`, so during a database outage
+        # EVERY readiness probe emits "Service Unavailable: /readyz" at ERROR,
+        # from every replica, for the duration — on top of the deliberate,
+        # detailed warning apps/core/health.py already logs.
+        #
+        # The filter sits on the LOGGER, not on a handler: this logger has none
+        # of its own and propagates to Django's, and a filter that returns False
+        # on a logger stops propagation too. No `handlers` key, deliberately —
+        # declaring one would clear what it inherits.
+        #
+        # Records carrying an exception are exempt inside the filter, so a real
+        # crash in a probe view still reaches the log with its traceback.
+        "django.request": {
+            "filters": ["suppress_health_checks"],
+        },
+    },
+}

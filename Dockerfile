@@ -150,24 +150,46 @@ USER app
 # `healthy` rather than merely `started` — see the db block in
 # docker-compose.yml, which M4-01 activates.
 #
-# What it proves TODAY: the interpreter and the installed virtualenv are
-# intact. There is no HTTP server yet; M6-01 replaces this with a request to
-# the readiness endpoint. Note the slim image has no curl or wget, so that
-# probe will be Python too — this is the shape it keeps.
+# What it proves (M6-01): the application is serving HTTP and its hard
+# dependencies answer. It requests /readyz — READINESS, not liveness — because
+# "healthy" here is the signal other services gate on with
+# `condition: service_healthy`, and that question is "can it serve traffic",
+# not "is the process alive".
+#
+# That choice is safe with Docker specifically, because Docker never restarts a
+# container for being unhealthy: a database outage marks this container
+# unhealthy and leaves it running, and it recovers on its own. Under an
+# orchestrator the two questions get two probes — livenessProbe -> /healthz,
+# readinessProbe -> /readyz. Pointing a livenessProbe at /readyz turns a
+# database outage into a restart loop across every replica. See docs/ops.md.
+#
+# Python, not curl: the slim image has neither curl nor wget, and adding one to
+# run a health check is a package and an attack surface for something the
+# interpreter already does. `http.client` rather than `urllib.request` because
+# it returns a non-2xx response instead of raising, so a 503 exits 1 cleanly
+# rather than through a traceback.
+#
+# 8000 is hardcoded, and correct: it is the port the application binds INSIDE
+# the container in both Compose profiles. APP_PORT and APP_PROD_PORT only map
+# the host side.
 #
 # The values are chosen, not copied:
 #   --interval=30s      this catches a container that has gone bad; it is not
 #                       sub-second failover. Polling harder is constant load
 #                       for no benefit, and it runs for the container's life.
-#   --timeout=5s        ~60x the measured probe cost (85ms), so a loaded
-#                       machine does not produce false failures.
-#   --start-period=10s  failures in this window do NOT count toward retries.
-#                       Too short and a slow first boot is reported as failure
-#                       and the container is restarted in a loop.
+#   --timeout=5s        the client gives up at 4s, so the probe reports a clean
+#                       failure a second before Docker kills it — a killed
+#                       probe tells you nothing about what went wrong.
+#   --start-period=40s  failures in this window do NOT count toward retries.
+#                       Raised from 10s with M6-01: that value was sized for
+#                       `import django`, but docker-entrypoint.sh now waits up
+#                       to DB_WAIT_TIMEOUT (30s) for the database BEFORE the
+#                       server starts. Too short and a slow first boot is
+#                       reported as failure.
 #   --retries=3         three consecutive failures before `unhealthy`, so one
 #                       transient blip does not flap the service.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["python", "-c", "import django"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+    CMD ["python", "-c", "import http.client,sys; c=http.client.HTTPConnection('127.0.0.1',8000,timeout=4); c.request('GET','/readyz'); sys.exit(0 if c.getresponse().status==200 else 1)"]
 
 # ENTRYPOINT is set in the image rather than in Compose, so every launch path
 # — docker run, both Compose profiles, any future deployment — goes through the

@@ -42,6 +42,26 @@ SECRET_KEY = require("DJANGO_SECRET_KEY")
 # require() first, so an empty value fails loudly instead of yielding [].
 ALLOWED_HOSTS = [h.strip() for h in require("DJANGO_ALLOWED_HOSTS").split(",") if h.strip()]
 
+# Loopback is appended, not required from the operator (M6-01).
+#
+# The container health check runs INSIDE the container and connects to
+# 127.0.0.1:8000; a Kubernetes probe connects to the pod IP. Neither can know
+# the public hostname, so with a strict ALLOWED_HOSTS every probe would get a
+# 400 DisallowedHost and every adopter's container would report permanently
+# unhealthy — for a reason that looks nothing like its cause.
+#
+# WHY THIS IS NOT A HOLE. Host-header validation exists to stop an attacker
+# poisoning the absolute URLs Django builds — password-reset links, redirects.
+# A request forging `Host: localhost` produces a link pointing at the victim's
+# own loopback, which is worth nothing to the attacker. Naming two loopback
+# values is a different thing entirely from `ALLOWED_HOSTS = ["*"]`, which is
+# what this must never become.
+#
+# A probe from a pod IP still needs that IP allowed; docs/ops.md covers it.
+for _probe_host in ("localhost", "127.0.0.1"):
+    if _probe_host not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(_probe_host)
+
 # --------------------------------------------------------------------------
 # Transport security
 # --------------------------------------------------------------------------
