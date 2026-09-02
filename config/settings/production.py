@@ -6,7 +6,7 @@ Selected only by DJANGO_SETTINGS_MODULE=config.settings.production.
 from django.core.exceptions import ImproperlyConfigured
 
 from .base import *  # noqa: F403
-from .base import database_from_url, env, require
+from .base import build_logging, database_from_url, env, require
 
 # --------------------------------------------------------------------------
 # DEBUG is off, and cannot be turned on
@@ -141,6 +141,18 @@ SILENCED_SYSTEM_CHECKS: list[str] = [
 # deliberately, and note that the docs page needs collectstatic to have run
 # (TODO(M6-03)) or it renders without its assets.
 API_DOCS_ENABLED = env.bool("DJANGO_API_DOCS_ENABLED", default=False)
+
+# --------------------------------------------------------------------------
+# Logging
+# --------------------------------------------------------------------------
+# JSON, one object per line, to stdout. The reader here is a log collector, not
+# a person: prose turns "every failed request for this user in this window"
+# from a query into guesswork.
+#
+# The override exists for the incident where a human is reading the raw stream
+# and wants it legible. It is not the normal case, and turning it on gives up
+# every query built on the structured fields.
+LOGGING = build_logging(env.str("DJANGO_LOG_FORMAT", default="json"))
 
 # PostgreSQL, from DATABASE_URL. See database_from_url() for the connection
 # reuse settings and the worker-count arithmetic that bounds them.

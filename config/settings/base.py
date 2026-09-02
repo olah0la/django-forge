@@ -19,6 +19,11 @@ from pathlib import Path
 import environ
 from django.core.exceptions import ImproperlyConfigured
 
+# Safe to import from a settings module, and the only project import here.
+# apps/core/logging.py holds nothing but standard library — see the warning in
+# its docstring about why it must stay that way.
+from apps.core.logging import CONSOLE_DATE_FORMAT, CONSOLE_FORMAT
+
 # The repository root. This file is config/settings/base.py, so THREE parents
 # up — it moved a level deeper when settings became a package (M3-02). Getting
 # this wrong points STATIC_ROOT and the database at the wrong directory.
@@ -122,6 +127,14 @@ LOCAL_APPS = [
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 MIDDLEWARE = [
+    # FIRST, on purpose. Middleware wraps in list order, so the first entry is
+    # the outermost one: the correlation identifier exists before any other
+    # middleware runs, and the response header is attached after all of them
+    # have finished. Moved further down, every line logged by the middleware
+    # above it would be uncorrelated — including the ones from a request that
+    # was rejected before reaching a view, which are the ones you most want to
+    # be able to find. See docs/logging.md.
+    "apps.core.middleware.RequestIDMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -229,6 +242,128 @@ def database_from_url() -> dict:
     config["CONN_HEALTH_CHECKS"] = config["CONN_MAX_AGE"] > 0
 
     return config
+
+
+# --------------------------------------------------------------------------
+# Logging (M6-04)
+# --------------------------------------------------------------------------
+# LOGGING itself is NOT set here, for the reason at the top of this file: the
+# format is environment-specific. Base defines the BUILDER and each layer calls
+# it with the format that layer wants — the same shape as database_from_url()
+# above.
+#
+# Everything goes to stdout. No file handler, ever: a log file written inside a
+# container is deleted with the container, and the one time you want it is
+# after the container is gone.
+
+# How much is emitted. The one logging knob that is genuinely operational —
+# turning up detail to investigate a live incident should not need a deploy.
+LOG_LEVEL = env.str("DJANGO_LOG_LEVEL", default="INFO").upper()
+
+# The header the correlation identifier is read from and returned in.
+#
+# NOT environment-readable. It is part of the contract between this service and
+# whatever calls it — change it on one side only and correlation silently stops
+# working across the boundary, with nothing failing. `X-Request-ID` is the de
+# facto name, understood by most proxies and log collectors already.
+REQUEST_ID_HEADER = "X-Request-ID"
+
+# Paths that get an identifier and a response header but no request log line.
+#
+# TODO(M6-01): the liveness and readiness endpoints belong here. An orchestrator
+# probes them every few seconds for the life of every container, which is tens
+# of thousands of identical lines a day burying everything of interest.
+#
+# Deliberately EMPTY until M6-01 chooses their paths — that issue owns its own
+# URL contract, and a guess here would either conflict with it or, worse, agree
+# with it by accident and look verified when it was not.
+REQUEST_LOG_EXCLUDED_PATHS: list[str] = []
+
+LOG_FORMATS = ("json", "console")
+
+
+def build_logging(fmt: str) -> dict:
+    """Build Django's LOGGING dictionary for one output format.
+
+    `json` for production — one object per line, which turns "every failed
+    request for this user in this window" into a query. `console` for
+    development, because reading JSON by eye all day is its own punishment.
+
+    Development can be run with DJANGO_LOG_FORMAT=json. That is not a
+    curiosity: two formats means the format that matters is the one nobody
+    looks at until it is deployed, and this is how that gets checked first.
+    """
+    if fmt not in LOG_FORMATS:
+        raise ImproperlyConfigured(
+            f"DJANGO_LOG_FORMAT={fmt!r} is not a known format. "
+            f"Choose one of: {', '.join(LOG_FORMATS)}."
+        )
+
+    return {
+        "version": 1,
+        # Loggers already created by imports that ran before this — every
+        # module-level `logging.getLogger(__name__)` in Django and in every
+        # dependency — would otherwise be switched OFF. The default for this
+        # key is True, and it is one of the great silent log-loss bugs.
+        "disable_existing_loggers": False,
+        "filters": {
+            "request_id": {"()": "apps.core.logging.RequestIDFilter"},
+        },
+        "formatters": {
+            "json": {"()": "apps.core.logging.JSONFormatter"},
+            "console": {
+                "format": CONSOLE_FORMAT,
+                "datefmt": CONSOLE_DATE_FORMAT,
+            },
+        },
+        "handlers": {
+            "console": {
+                "class": "logging.StreamHandler",
+                "stream": "ext://sys.stdout",
+                "formatter": fmt,
+                # On the HANDLER, so every record reaching it is correlated no
+                # matter which logger produced it. See apps/core/logging.py.
+                "filters": ["request_id"],
+            },
+        },
+        # The one handler lives here and everything propagates to it. That is
+        # why none of the loggers below declare handlers of their own: a logger
+        # WITH a handler that also propagates prints every line twice.
+        "root": {"handlers": ["console"], "level": LOG_LEVEL},
+        "loggers": {
+            # Django applies its own DEFAULT_LOGGING first and this dictionary
+            # second, so naming a logger here REPLACES what Django gave it —
+            # including the `mail_admins` handler on `django`, which this
+            # project does not configure and must not silently inherit.
+            "django": {"level": LOG_LEVEL},
+            # Pinned at INFO, and NOT following LOG_LEVEL. At DEBUG this logger
+            # prints every SQL statement WITH ITS BOUND PARAMETERS — the widest
+            # secret leak available in this configuration, and it is one
+            # environment variable away in every other project that wires
+            # logging without noticing. Turning it on is a deliberate local
+            # edit, described in docs/logging.md, not a side effect of asking
+            # for more detail.
+            "django.db.backends": {"level": "INFO"},
+            # runserver's logger. This project never runs it, but leaving
+            # Django's default in place would mean the one command that does
+            # emits a differently-formatted line.
+            "django.server": {"level": "INFO", "propagate": True},
+            # Project code. `apps.request` — the request log — is under it.
+            "apps": {"level": LOG_LEVEL},
+            # Uvicorn's own startup and error output, reformatted rather than
+            # silenced: "Application startup complete" and a failed bind belong
+            # in the same stream as everything else.
+            "uvicorn": {"level": "INFO", "propagate": True},
+            "uvicorn.error": {"level": "INFO", "propagate": True},
+            # SILENCED, and this is a decision rather than noise reduction.
+            # RequestIDMiddleware already logs one line per request, and it is
+            # the only layer that can see the correlation identifier. Leaving
+            # this on gives two lines per request, one of them uncorrelated.
+            # TODO(M6-02): Gunicorn's access log needs the same treatment for
+            # the same reason — see docs/logging.md.
+            "uvicorn.access": {"handlers": [], "level": "INFO", "propagate": False},
+        },
+    }
 
 
 AUTH_PASSWORD_VALIDATORS = [

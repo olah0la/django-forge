@@ -8,7 +8,9 @@ against.
 `router` below is that missing half — shaped exactly like a feature app's, and
 mounted on a throwaway instance by the tests. `users_router` is the second half
 of the same argument for M5-03: it exercises the shipped schemas through real
-HTTP without the project shipping a user API.
+HTTP without the project shipping a user API. `logging_router` is the third:
+M6-04 has to prove a secret never reaches a log, which needs an endpoint that
+receives one and then fails — something no shipped endpoint may be.
 
 Both stay here rather than becoming real apps under `apps/`, because an app
 shipped purely as a demonstration is one every derived project has to delete;
@@ -18,11 +20,13 @@ M7-04 owns the removable worked example.
 tests/testapp/urls.py mounts them on an instance of their own.
 """
 
+import logging
+
 from django.contrib.auth.models import User
 from django.db.models import QuerySet
 from django.http import HttpRequest
 from django.shortcuts import get_object_or_404
-from ninja import PatchDict, Router
+from ninja import PatchDict, Router, Schema
 from ninja.pagination import RouterPaginated
 
 from apps.core.schemas import UserCreateIn, UserOut, UserUpdateIn
@@ -105,3 +109,46 @@ def update_user(request: HttpRequest, user_id: int, payload: PatchDict[UserUpdat
         setattr(user, attribute, value)
     user.save()
     return user
+
+
+# ---------------------------------------------------------------------------
+# The redaction fixture (M6-04)
+# ---------------------------------------------------------------------------
+# M6-04's last acceptance criterion is that passwords and tokens are never
+# logged, "verified by triggering an error on an endpoint receiving sensitive
+# input". That needs an endpoint that both TAKES a secret and FAILS — a
+# combination no shipped endpoint should ever have, which is exactly why it
+# lives here rather than in apps/.
+#
+# What the failing request exercises, in one round trip:
+#   * Django's `django.request` logger, which attaches the live HttpRequest to
+#     the ERROR record it emits for a 500 — the leak JSONFormatter's allow-list
+#     exists to close.
+#   * The request log line from RequestIDMiddleware, over a URL with a token in
+#     its query string.
+#   * A view logging a message of its own while handling the request, so the
+#     correlation identifier can be shown to reach it.
+logging_router = Router(tags=["logging"])
+
+logger = logging.getLogger("apps.testapp")
+
+
+class SecretIn(Schema):
+    """Input shaped like a real login: a name, and two things that must not leak."""
+
+    username: str
+    password: str
+    token: str
+
+
+@logging_router.post("/boom", summary="Fail while holding a secret")
+def boom(request: HttpRequest, payload: SecretIn) -> None:
+    """Raise, with the caller's secrets in scope at the moment it happens.
+
+    The message deliberately mentions the username and NOT the password. A test
+    that only asserts the absence of a string proves nothing if nothing was
+    logged at all, so the username is the positive control: it must be present,
+    and its neighbours must not.
+    """
+    logger.info("about to fail for %s", payload.username)
+    raise RuntimeError("deliberate failure for the logging test")
