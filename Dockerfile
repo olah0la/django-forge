@@ -175,19 +175,27 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 # arrives as this script's "$@" and is exec'd.
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
-# There is no application to run yet. Fail with a message that says what is
-# missing and which issue delivers it, rather than an opaque traceback.
-# M6-02 replaces this with the real gunicorn invocation.
-CMD ["sh", "-c", "echo; \
-echo '  django-forge: no application in this image yet.'; \
-echo; \
-echo '    The Django project arrives with M3-01, and the production'; \
-echo '    server command with M6-02.'; \
-echo; \
-echo '    The Python environment IS installed — inspect it with:'; \
-echo '      docker run --rm -it <image> python'; \
-echo; \
-exit 1"]
+# ---------------------------------------------------------------------------
+# The production server (M6-02)
+# ---------------------------------------------------------------------------
+# Gunicorn supervising Uvicorn workers. Gunicorn forks and restarts processes;
+# Uvicorn speaks ASGI. Django's `runserver` is not here and never will be — it
+# is single-threaded, unoptimised, WSGI-only, and explicitly not for production.
+#
+# Exec form, so this is exec'd directly with no intervening shell. The shell
+# form would leave `sh` as the process the entrypoint execs, and SIGTERM would
+# reach the shell rather than gunicorn — the failure M2-05's `exec` exists to
+# prevent, reintroduced one line later. M6-05 depends on this too.
+#
+# ALL TUNING LIVES IN config/gunicorn.py, not in flags here. `python:` loads it
+# as a module rather than a file path, so it resolves regardless of working
+# directory. One file to read, one file to change, and the Compose
+# production-like service overrides none of it — it runs the image as built.
+#
+# `-c` comes AFTER the application because gunicorn accepts options in either
+# position; keeping the app first matches how the command is usually read
+# aloud: run this application, with this configuration.
+CMD ["gunicorn", "config.asgi:application", "-c", "python:config.gunicorn"]
 
 # ===========================================================================
 # Stage 3 — dev: runtime plus the tooling needed to test against PostgreSQL

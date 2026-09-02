@@ -218,6 +218,10 @@ def database_from_url() -> dict:
     # 60s is a deliberate middle: long enough that the per-request cost
     # disappears, short enough that idle connections are not held for minutes
     # per worker. See docs/layout.md.
+    #
+    # The other half of the multiplication is the WORKER COUNT, which M6-02
+    # made configurable — config/gunicorn.py holds it, and docs/serving.md
+    # works the arithmetic through with numbers for both halves.
     config["CONN_MAX_AGE"] = env.int("DJANGO_CONN_MAX_AGE", default=60)
 
     # A pooled connection can be killed by a database restart or a network

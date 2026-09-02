@@ -37,9 +37,18 @@ dependencies = [
     # local compiler is needed. M2-01 should revisit this for the production
     # image, where psycopg[c] can be preferable.
     "psycopg[binary]>=3.3,<4.0",
-    # Production application server and ASGI workers (M6).
+    # Production application server and ASGI workers (M6-02). Gunicorn
+    # supervises processes; uvicorn speaks ASGI. Neither does the other's job,
+    # which is why both are here. See docs/serving.md.
     "gunicorn>=26.0,<27.0",
+    # [standard] pulls uvloop and httptools — the fast event loop and HTTP
+    # parser the worker class below uses.
     "uvicorn[standard]>=0.52,<1.0",
+    # The Gunicorn worker class, as its OWN package. uvicorn still ships
+    # `uvicorn.workers`, but importing it emits a DeprecationWarning naming
+    # this package as the replacement, and it is slated for removal. A template
+    # must not ship a deprecated import that every derived project inherits.
+    "uvicorn-worker>=0.4,<1.0",
     # Typed environment-variable parsing (M3-03). Converts and validates env
     # values so misconfiguration fails loudly at startup rather than behaving
     # strangely later.

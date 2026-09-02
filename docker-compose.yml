@@ -146,8 +146,16 @@ services:
     # 0.0.0.0 is required: binding to 127.0.0.1 would only accept connections
     # from inside the container, so the published port would appear dead.
     #
-    # TODO(M6-02): --reload is a development feature and must never ship;
-    # app-prod runs uvicorn without it, and M6-02 puts Gunicorn in front.
+    # DEVELOPMENT DOES NOT USE GUNICORN, and that is a decision, not an
+    # omission (M6-02). An arbiter has no `--reload` worth having, and it
+    # forks: a traceback arrives from a worker process, interleaved with the
+    # arbiter's own restart chatter, instead of on the terminal you are
+    # watching. What matters is that neither profile runs Django's
+    # `runserver` — both serve config.asgi:application, so the ASGI path is
+    # exercised every day rather than first discovered in production.
+    #
+    # `--reload` is a development feature and must never ship. app-prod runs
+    # the image's own CMD, which is gunicorn — see that service below.
     command:
       - uvicorn
       - config.asgi:application
@@ -254,31 +262,52 @@ services:
       DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:-}"
       DJANGO_ALLOWED_HOSTS: "${DJANGO_ALLOWED_HOSTS:-}"
 
+      # The same database as the development stack, on the same Compose
+      # network. This profile reproduces how the app is SERVED, not a second
+      # copy of the data.
+      #
+      # It is required, with no fallback (M4-02), and it was MISSING here until
+      # M6-02 — so this service could not boot at all from M4-02 onward, and
+      # nothing noticed because nothing had reason to start it. Found by
+      # running it; the bare uvicorn command it used to run fails identically.
+      # That is the argument for `make up-prod` being part of the routine, not
+      # a thing done once per milestone.
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-forge}:${POSTGRES_PASSWORD:-forge}@db:5432/${POSTGRES_DB:-forge}"
+
     ports:
       # A different host port on purpose, so starting this stack while the
       # development one is up fails on neither port nor patience.
       - "${APP_PROD_PORT:-8001}:8000"
 
+    # Same reasoning as the development service: wait for the database to
+    # ANSWER, not merely to have started. The entrypoint's own wait loop is the
+    # second line of defence, not a substitute — without this, `make up-prod`
+    # on a cold stack spends its startup budget in that loop.
+    depends_on:
+      db:
+        condition: service_healthy
+
     # Give the application time to finish in-flight requests before it is
     # killed. M6-05 makes the server itself honour SIGTERM; this is the other
-    # half of that, and 30s matches the default gunicorn graceful timeout.
+    # half of it.
+    #
+    # 30s, against gunicorn's graceful_timeout of 25 (config/gunicorn.py). The
+    # five-second gap is deliberate and must survive edits to either number: if
+    # they were equal, Compose could SIGKILL at the same instant gunicorn is
+    # still draining, and the graceful timeout would never get to do its job.
+    # 30 is also Kubernetes' terminationGracePeriodSeconds default, so the
+    # in-image value stays correct on a platform that never reads this file.
     stop_grace_period: 30s
 
-    # --- ASGI server (no reload) ---------------------------------------------
-    # The same interface as development, served the way a deployment would:
-    # no --reload, no source mount.
+    # --- NO `command:` HERE, DELIBERATELY -------------------------------------
+    # This service runs the image's own CMD: gunicorn supervising uvicorn
+    # workers, configured entirely by config/gunicorn.py (M6-02).
     #
-    # TODO(M6-02): put Gunicorn in front, managing Uvicorn workers, with
-    # worker count and timeouts from the environment. A single uvicorn process
-    # has no process supervision and no graceful-restart story — fine for
-    # reproducing a production-only problem locally, not for deployment.
-    command:
-      - uvicorn
-      - config.asgi:application
-      - --host
-      - 0.0.0.0
-      - --port
-      - "8000"
+    # That is the whole point of the profile. The image is the deployment
+    # artefact, and an override here would mean the thing verified locally is
+    # not the thing that ships — the same reason there is no source mount
+    # above. Tuning belongs in config/gunicorn.py, which reads the environment;
+    # see the "Application server" section of .env.example and docs/serving.md.
 
 # ---------------------------------------------------------------------------
 # Volumes
