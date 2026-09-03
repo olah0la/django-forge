@@ -226,7 +226,6 @@ expensive startup work should reach for it rather than inflating `initialDelaySe
 Each arrives with its issue, and this file is where it gets written down:
 
 - **M6-02** — the production application server, its worker and timeout defaults, and the reasoning
-- **M6-03** — the static and media file strategy
 - **M6-04** — structured logging and request correlation identifiers
 - **M6-05** — graceful shutdown and the `SIGTERM` sequence
 

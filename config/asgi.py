@@ -25,19 +25,20 @@ require_settings_module()
 application = get_asgi_application()
 
 # --------------------------------------------------------------------------
-# Static files in development
+# Static files are NOT wrapped here (M6-03)
 # --------------------------------------------------------------------------
-# `runserver` used to serve static files automatically in DEBUG. uvicorn does
-# not, so without this the admin renders unstyled and looks broken.
+# This module used to wrap the application in `ASGIStaticFilesHandler` under
+# DEBUG, because `runserver` serves static files automatically and uvicorn does
+# not — without something, the admin renders unstyled and looks broken.
 #
-# Applied only under DEBUG, so production is untouched: M6-03 owns the real
-# static-serving strategy, and serving them from the application process is
-# not it.
+# That wrapper is gone. WhiteNoise is in MIDDLEWARE (config/settings/base.py)
+# and serves static in EVERY layer, so the mechanism exercised on a laptop is
+# the mechanism that runs in production. One fewer thing that only breaks after
+# deployment.
 #
-# Imported here rather than at module top so settings are configured first.
-from django.conf import settings  # noqa: E402
-
-if settings.DEBUG:
-    from django.contrib.staticfiles.handlers import ASGIStaticFilesHandler  # noqa: E402
-
-    application = ASGIStaticFilesHandler(application)
+# The old comment here said serving static from the application process "is not
+# it", and that was true of what it was describing. `ASGIStaticFilesHandler` is
+# a debug convenience: no cache headers, no compression, no content hashing,
+# and it re-reads the disk on every request. WhiteNoise does all four, which is
+# the entire difference between a development crutch and a static server that
+# happens to live in the same process. See docs/serving.md.

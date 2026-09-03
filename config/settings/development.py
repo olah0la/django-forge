@@ -50,3 +50,22 @@ SEED_ENABLED = True
 # acceptance criterion of M5-01, and the reason the docs are worth having at
 # all: an endpoint you can call from the browser while writing it.
 API_DOCS_ENABLED = True
+
+# --------------------------------------------------------------------------
+# Static files (M6-03)
+# --------------------------------------------------------------------------
+# WhiteNoise serves static in EVERY layer, so the mechanism that runs on a
+# laptop is the mechanism that runs in production. These two settings are the
+# only difference, and both exist so that no local `collectstatic` is required.
+#
+# Resolve through the staticfiles finders — each app's own static/ directory —
+# rather than through STATIC_ROOT. Without it, WhiteNoise looks for a
+# `staticfiles/` that a checkout does not have, logs "No directory at:", and
+# serves nothing: the admin renders unstyled and looks broken.
+WHITENOISE_USE_FINDERS = True
+
+# Re-check the file on every request instead of caching the directory scan at
+# startup, so an edited stylesheet appears on reload. This is the setting that
+# would be actively wrong in production — it stats the filesystem per request —
+# which is exactly why it is here and not in base.
+WHITENOISE_AUTOREFRESH = True

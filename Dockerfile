@@ -68,6 +68,48 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # and caches are excluded, which is what keeps this copy small.
 COPY . .
 
+# --- static files, collected NOW and never at startup ---------------------
+# `collectstatic` copies every app's static/ directory — the admin's CSS, and
+# the 7.9 MB of Swagger UI that renders /api/v1/docs — into STATIC_ROOT
+# (/app/staticfiles), where WhiteNoise serves them. Production also hashes
+# every filename and writes .gz/.br siblings, so this is where the compression
+# happens: once, per build, rather than per request in a worker.
+#
+# AT BUILD TIME, DELIBERATELY. The same argument docker-entrypoint.sh makes for
+# migrations, for a different reason: the image becomes self-contained, its
+# contents depend on what it IS rather than on when it booted, and startup does
+# no work. Collecting at container start would instead redo identical work on
+# every replica of every deploy, and put a filesystem walk inside the window
+# the health check is timing.
+#
+# The cost is real and worth naming: a changed asset now requires a rebuild,
+# and the image is larger by the size of the collected tree.
+#
+# THE ENVIRONMENT VARIABLES ARE DUMMIES, and this is the same idiom `make
+# audit` and `make typecheck` already use. `collectstatic` touches no database
+# and serves nothing — it only needs the settings module to IMPORT, and
+# config/settings/base.py requires DATABASE_URL with no fallback while the
+# production layer requires a key and hosts. Nothing here connects.
+#
+# The key is GENERATED rather than written literally, so nothing resembling a
+# credential enters the repository or a layer of this image. `make audit` scans
+# the full git history with gitleaks and must stay clean.
+#
+# Production settings, not development: that is the layer whose storage backend
+# writes staticfiles.json and the compressed variants. Collecting under
+# development settings would produce an unhashed tree with no manifest, and
+# every {% static %} call would then raise at runtime.
+#
+# What lands here is root-owned, and stays that way — `chown app:app /app` in
+# the runtime stage is deliberately not recursive. WhiteNoise only reads these
+# files, so the application cannot rewrite what it serves.
+RUN DJANGO_SETTINGS_MODULE=config.settings.production \
+    DJANGO_ENV_FILE=/nonexistent \
+    DJANGO_ALLOWED_HOSTS=build.invalid \
+    DATABASE_URL=postgresql://build:build@localhost:5432/build \
+    DJANGO_SECRET_KEY="$(/opt/venv/bin/python -c 'import secrets; print(secrets.token_urlsafe(50))')" \
+    /opt/venv/bin/python manage.py collectstatic --noinput
+
 # ===========================================================================
 # Stage 1b — builder-dev: the same install, plus development tooling
 # ===========================================================================

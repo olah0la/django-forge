@@ -265,11 +265,179 @@ make logs | grep -c "Booting worker"   # 3
 
 ---
 
+## Static files
+
+Static files are **collected into the image at build time and served by WhiteNoise**, in every
+profile. There is nothing to configure and nothing to run before a deploy.
+
+```bash
+make build
+docker compose --profile prod run --rm --entrypoint sh app-prod -c 'ls staticfiles/ | head'
+# admin  ninja  staticfiles.json
+
+make up-prod
+curl -sI localhost:8001/static/admin/css/base.96c479cedf7a.css | grep -i cache-control
+# cache-control: max-age=315360000, public, immutable
+```
+
+### Collected during the build, not at startup
+
+The `collectstatic` step lives in the `builder` stage of the `Dockerfile`, next to the source copy.
+This is the same argument [migrations.md](migrations.md) makes for not migrating at startup, reached
+for a different reason: an image that collects its own assets is **self-contained**, and its contents
+depend on what it is rather than on when it happened to boot.
+
+Collecting at container start would instead redo identical work on every replica of every deploy,
+and would put a filesystem walk inside the window the health check is timing.
+
+**The cost, stated honestly.** A changed asset now requires a rebuild — you cannot edit a stylesheet
+in a running production container and see it — and the image is larger by the size of the collected
+tree. Measured on this repository: 136 source files collected and 676 post-processed, landing as 270
+`.gz` and 270 `.br` siblings beside their hashed originals — most of it the Swagger UI bundle that
+renders `/api/v1/docs`.
+
+### The build step uses dummy environment variables, and that is fine
+
+`collectstatic` runs under `config.settings.production`, which requires a secret key, allowed hosts
+and a database URL. The Dockerfile supplies throwaway values, exactly as `make audit` and
+`make typecheck` already do:
+
+```dockerfile
+RUN DJANGO_SETTINGS_MODULE=config.settings.production \
+    DJANGO_ENV_FILE=/nonexistent \
+    DJANGO_ALLOWED_HOSTS=build.invalid \
+    DATABASE_URL=postgresql://build:build@localhost:5432/build \
+    DJANGO_SECRET_KEY="$(/opt/venv/bin/python -c 'import secrets; print(secrets.token_urlsafe(50))')" \
+    /opt/venv/bin/python manage.py collectstatic --noinput
+```
+
+Nothing connects and nothing is served: the command only needs the settings module to **import**.
+The key is *generated* rather than written as a literal, so nothing resembling a credential enters
+the repository or a layer of the image — `make audit` scans the full git history and must stay clean.
+
+**Production settings, not development, and that part is load-bearing.** Only the production layer
+uses the storage backend that writes `staticfiles.json` and the compressed variants. Collect under
+development settings and you get an unhashed tree with no manifest, and every `{% static %}` call
+raises at runtime.
+
+### Why the application serves them at all
+
+The usual advice is that a Python process should not serve bytes — put nginx or a CDN in front. That
+advice is about `django.contrib.staticfiles`, and it is correct about it.
+
+WhiteNoise is a different thing wearing the same shape. Outside development it does no filesystem
+work per request at all — the URL-to-file mapping is built once at startup and a lookup is a `dict`
+hit — and it answers with three properties the development handler has none of:
+
+| | `ASGIStaticFilesHandler` | WhiteNoise |
+| --- | --- | --- |
+| Cache headers | none | `max-age=315360000, public, immutable` on hashed names |
+| Compression | none | `.gz` and `.br` written at build time, chosen by `Accept-Encoding` |
+| Content hashing | none | `base.css` → `base.96c479cedf7a.css` |
+| Disk access per request | re-reads | none, outside development |
+
+Content hashing is what makes that lifetime safe: a changed file is a changed **name**, so there is
+no stale-asset window to reason about. Without it, a long cache lifetime is precisely how a deploy
+ships new HTML against a browser's cached old stylesheet.
+
+The pairing is enforced, not assumed. WhiteNoise decides per response, and an unhashed name does not
+get the long header — measured on the running production-like profile:
+
+```
+/static/admin/css/base.96c479cedf7a.css   cache-control: max-age=315360000, public, immutable
+/static/admin/css/base.css                cache-control: max-age=60, public
+```
+
+**Rejected: an nginx sidecar in the prod profile.** It would be more faithful to a large deployment,
+and it would add a service, a config file and a second port to a stack that is otherwise two
+containers. The template declines to pick an edge on an adopter's behalf for the same reason it
+declines to pick a deployment target.
+
+**The cost of this choice** is worker CPU spent on bytes a CDN could serve, and it is the reason the
+next section exists.
+
+### Putting a CDN in front
+
+Nothing needs to change in the application. Point the CDN at the service as its origin and it caches
+correctly on the first request, because the responses already carry `immutable` and a hash in the
+filename — the two things a CDN needs to be told, said in the response rather than in a config file.
+
+Serving assets from a *separate* domain rather than through the same host is the one change that
+needs code: `STATIC_URL` is a path (`static/`), and pointing it at `https://cdn.example.com/static/`
+makes Django write absolute URLs into every template. That is a one-line override in your own
+settings layer when you need it, deliberately not shipped as a variable here — a template that ships
+a guess at a CDN hostname is a template every adopter has to un-guess.
+
+---
+
+## Media files are not static files
+
+> ### ⚠️ A container filesystem is not storage
+>
+> Django's default writes uploads to `MEDIA_ROOT`, **inside the container**. That works perfectly on
+> a laptop, works perfectly in staging, and destroys every uploaded file the first time a container
+> is replaced — which is every deploy, every scale-in, and every node replacement.
+>
+> Nothing raises. No log line appears. The files are simply gone, and the code that lost them still
+> passes its tests. This is the single most expensive default in a containerised Django project,
+> because the feedback arrives weeks after the mistake.
+
+Static files ship *with* the code and change when you deploy. Media files arrive *at run time, from
+people*, and must outlive every container that ever handles them. Django names the two settings
+almost identically and in development both are just files on disk, which is why they get conflated.
+
+### The substitution point
+
+The answer is **object storage** — S3, GCS, Azure Blob, or whatever the platform offers. It is
+durable independently of any container, reachable from every replica at once, and it is what every
+managed platform expects you to be using.
+
+`STORAGES["default"]` reads a dotted path from the environment, so getting there is a variable
+rather than a patch:
+
+```bash
+uv add django-storages[s3]
+echo 'DJANGO_DEFAULT_FILE_STORAGE=storages.backends.s3.S3Storage' >> .env
+```
+
+It chooses **which** backend, not how that backend is configured. Bucket, region, credentials and
+signing are the backend's own settings and belong in your settings layer — deliberately not modelled
+here, because every provider names them differently and a template that guessed would be wrong for
+all but one.
+
+An unimportable path fails loudly at the first file access rather than falling back to local disk.
+That is the behaviour to want: a silent fallback is exactly how uploads end up on an ephemeral
+filesystem without anyone having decided to put them there.
+
+### Why there is no `media_data` volume
+
+Adding one to `app-prod` would be a single line, and it would look like a fix — uploads would survive
+`docker compose down` on your machine. It is deliberately not offered.
+
+A volume is **one host**. The moment there is a second replica, half the uploads are invisible to
+half the requests; the moment a node is replaced, they are gone. A volume does not solve the problem,
+it moves the discovery of the problem from your laptop to production, which is the wrong direction.
+
+The production-like profile therefore behaves exactly like a deployment: uploads written to the
+container are lost when it is replaced. That is not an omission.
+
+### Two rules for code that handles uploads
+
+1. **Go through the storage API**, never `open()` on a path. `default_storage.save(...)`,
+   `FileField`, `instance.file.open()`. Code that opens a path works with the filesystem backend and
+   breaks the day someone switches to S3 — and it breaks at run time, on the upload path, in
+   production.
+2. **Never serve media through Django in production.** `config/urls.py` serves `MEDIA_URL` under
+   `DEBUG` only, via `static()`, which returns an empty list when `DEBUG` is false. It exists so an
+   `ImageField` is viewable locally. WhiteNoise deliberately does not do this job: it serves
+   `STATIC_ROOT`, which is code, cacheable for a year, and public.
+
+---
+
 ## What this document still owes
 
 | Owed by | What lands here |
 | --- | --- |
 | **M6-01** | The liveness and readiness endpoints, and the container `HEALTHCHECK` that calls readiness instead of `import django` |
-| **M6-03** | Static and media files — `collectstatic` at build time, and why a container filesystem is the wrong place for uploads |
 | **M6-04** | Access lines and application logs as JSON through one configuration, with a correlation identifier. Request duration and that identifier have to come from Django middleware, not a server format string — see the logging section above |
 | **M6-05** | The shutdown sequence end to end: `SIGTERM` to the arbiter, readiness failing immediately, in-flight requests draining inside `graceful_timeout`, connections closed cleanly |

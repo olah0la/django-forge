@@ -37,7 +37,7 @@ runs one way: `config/` imports app routers, and an app never imports `config.ap
 **Read [api.md](api.md) before changing the URL prefix** — it is the one decision here that cannot
 be revised once a client exists.
 
-### The two exceptions in the root URLconf
+### The three exceptions in the root URLconf
 
 `config/urls.py` carries exactly two things that are not the API mount: the admin, and the health
 probes (`/healthz`, `/readyz`). Both are project wiring rather than application endpoints, which is
@@ -145,10 +145,15 @@ it either raises, or silently blocks the event loop — which is worse, because 
 
 ### Static files
 
-`runserver` served static files automatically in `DEBUG`; uvicorn does not. `config/asgi.py` wraps
-the application in `ASGIStaticFilesHandler` **only when `DEBUG` is true**, so the admin stays styled
-in development. Production is deliberately untouched — M6-03 decides how static files are served
-there.
+`runserver` served static files automatically in `DEBUG`; uvicorn does not. **WhiteNoise middleware**
+serves them instead, in every settings layer, so the mechanism exercised on a laptop is the one that
+runs in production (M6-03). `config/asgi.py` no longer wraps the application in
+`ASGIStaticFilesHandler` — that wrapper was a debug convenience with no caching, compression or
+content hashing, and keeping it would have meant two mechanisms with only one of them ever tested.
+
+Development and the test layer resolve through the staticfiles finders (`WHITENOISE_USE_FINDERS`),
+so neither needs `collectstatic` to have run. Production reads the collected, hashed, pre-compressed
+tree that the image build produced. See [serving.md](serving.md).
 
 ## Production hardening
 

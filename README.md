@@ -306,6 +306,35 @@ one commented file, [`config/gunicorn.py`](config/gunicorn.py), and
 gunicorn's `timeout` does **not** bound a request, and worker count multiplies against PostgreSQL's
 connection limit.
 
+**Static files are baked into the image and served by the app** (M6-03) — no `collectstatic` step in
+your deploy, and no nginx sidecar to run:
+
+```bash
+make build                                          # collectstatic runs HERE, in the builder stage
+curl -sI localhost:8001/static/admin/css/base.96c479cedf7a.css | grep -i cache-control
+#   cache-control: max-age=315360000, public, immutable   # safe: the hash IS the filename
+```
+
+WhiteNoise serves them in every layer, so the mechanism running on your laptop is the one running in
+production. A ten-year cache is safe because a changed file is a changed *name* — and only hashed
+names get it; request `base.css` without the hash and the answer is `max-age=60`. The `.gz`/`.br`
+variants are written once at build time rather than compressed per request.
+
+**User uploads are a different problem, and this template deliberately does not solve it.** Writing
+them to `MEDIA_ROOT` works on a laptop, works in staging, and destroys every file the first time a
+container is replaced — no error, no log line. `STORAGES["default"]` is therefore one environment
+variable away from object storage:
+
+```bash
+DJANGO_DEFAULT_FILE_STORAGE=storages.backends.s3.S3Storage
+```
+
+There is deliberately **no media volume** in the production-like profile: a volume is one host, so it
+would hide the problem on your machine and surface it in production instead.
+[docs/serving.md](docs/serving.md) covers both halves — why the build collects rather than the
+startup, why serving static from the application process is defensible here when it is not for
+Django's own handler, putting a CDN in front, and the two rules for code that touches uploads.
+
 Targets tagged for milestones that have not landed are listed but not usable — running one tells you
 which file is missing and which issue delivers it, rather than failing with a raw error. The
 underlying commands are plain `uv`:
@@ -352,6 +381,7 @@ sound.
 | **ASGI / WSGI** | The interfaces between a web server and a Python application. WSGI handles one request per worker at a time; ASGI additionally supports asynchronous views and long-lived connections. |
 | **Migration** | A versioned, ordered description of a database schema change. Django generates them from your model changes. They are also the most common cause of serious production incidents — an operation that is instant on 50 local rows can lock a 50-million-row table. |
 | **Liveness vs. readiness** | Two different questions an orchestrator asks. *Liveness*: "is this process healthy, or should I restart it?" *Readiness*: "should I send it traffic right now?" A container still opening its database connections is alive but not ready — conflating the two causes outages. Served here as `/healthz` and `/readyz`, deliberately outside `/api/v1/`: a probe URL is an infrastructure contract, not an API one. See [docs/ops.md](docs/ops.md). |
+| **Static vs. media files** | *Static* files ship with the code — CSS, JavaScript, the admin's images — and change only when you deploy. *Media* files are user uploads: they arrive at run time and must outlive every container that handles them. Django names the two settings almost identically and in development both are just files on disk, which is why writing uploads into the container is such a common and such an expensive mistake. |
 | **Error envelope** | A single documented JSON shape used for every error the API returns. Without one, clients must handle a different shape per error type, and will get at least one of them wrong. |
 | **Correlation ID** | A unique value attached to every log line produced while handling one request, so those lines can be reassembled from logs interleaved across many concurrent requests. |
 | **Graceful shutdown** | Finishing in-flight requests when the platform sends `SIGTERM`, instead of dropping them. Containers are stopped on every deploy, so an app that ignores `SIGTERM` drops requests on every release. |

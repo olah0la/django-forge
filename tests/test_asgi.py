@@ -1,8 +1,7 @@
 """The ASGI entrypoint.
 
 These guard the wiring, not Django itself: that `config.asgi:application`
-exists, is an ASGI callable, and that the development-only static wrapper does
-not leak into other layers.
+exists, is an ASGI callable, and that nothing wraps it on the way out.
 """
 
 import inspect
@@ -25,14 +24,22 @@ def test_asgi_application_is_an_asgi_callable():
     assert params[:3] == ["scope", "receive", "send"], params
 
 
-def test_static_wrapper_is_not_applied_outside_debug():
-    """The ASGIStaticFilesHandler wrapper is a development convenience.
+def test_no_static_handler_wraps_the_application():
+    """`ASGIStaticFilesHandler` is gone, in every layer (M6-03).
 
-    Serving static files from the application process is not a production
-    strategy — M6-03 owns that — so it must not appear when DEBUG is off.
-    The test layer runs with DEBUG=False, which is what makes this meaningful.
+    It used to wrap the application under DEBUG, because uvicorn does not serve
+    static files the way `runserver` did. WhiteNoise middleware does that job
+    now, in every settings layer, so the mechanism exercised locally is the one
+    that runs in production.
+
+    Reintroducing the wrapper would be a regression in two directions: a second
+    static mechanism that only ever runs in development, and a handler with no
+    caching, compression or content hashing sitting in front of one that has
+    all three. See config/asgi.py and docs/serving.md.
     """
     from config.asgi import application
 
     assert settings.DEBUG is False
-    assert type(application).__name__ == "ASGIHandler"
+    assert type(application).__name__ == "ASGIHandler", (
+        f"something wrapped the ASGI application: {type(application).__name__}"
+    )

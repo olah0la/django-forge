@@ -228,6 +228,12 @@ description:
    the response is a collection type; the second is yours — offset pagination over an unordered
    queryset silently repeats and drops rows. See
    [docs/api.md](docs/api.md#order-by-is-load-bearing).
+10. **Uploads go through the storage API, and nothing else expects the filesystem to persist.**
+    `default_storage` / `FileField`, never `open()` on a path — code that opens a path works with
+    the local backend and breaks on the upload path, in production, the day someone switches to
+    object storage. The same rule covers caches, generated exports and scratch files: a container's
+    disk is gone on the next deploy. See
+    [docs/serving.md](docs/serving.md#media-files-are-not-static-files).
 
 Reviewers ask questions to understand, not to challenge. If a comment reads as blunt, assume it is
 brevity rather than criticism — and if a review comment is unclear, ask.

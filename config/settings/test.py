@@ -81,3 +81,24 @@ API_DOCS_ENABLED = True
 # database. The app has no migrations, so Django creates its tables directly
 # during test-database setup.
 INSTALLED_APPS = [*INSTALLED_APPS, "tests.testapp"]  # noqa: F405
+
+# --------------------------------------------------------------------------
+# Static files (M6-03)
+# --------------------------------------------------------------------------
+# The suite runs with DEBUG = False against a checkout that has no collected
+# `staticfiles/`, and WhiteNoise reads its two defaults from DEBUG. Left alone
+# it therefore takes the PRODUCTION path: scan STATIC_ROOT once at startup,
+# find nothing, and `warnings.warn("No directory at: ...")` on every run.
+#
+# BOTH settings are needed, and the pairing is not obvious. Only AUTOREFRESH
+# suppresses the scan — whitenoise/base.py:101 records the directory instead of
+# walking it, so a missing one is not an error. USE_FINDERS is what then makes
+# the lookup succeed, by resolving through the staticfiles finders. Setting
+# just one of them either warns (finders alone) or serves nothing (autorefresh
+# alone, against a directory that does not exist).
+#
+# The production manifest backend is deliberately NOT used here: it would make
+# every test run depend on `collectstatic` having been run first, which is a
+# build step the suite must not need.
+WHITENOISE_USE_FINDERS = True
+WHITENOISE_AUTOREFRESH = True

@@ -53,6 +53,14 @@ dependencies = [
     # values so misconfiguration fails loudly at startup rather than behaving
     # strangely later.
     "django-environ>=0.14,<1.0",
+    # Static file serving from the application process (M6-03). Not the same
+    # thing as Django's development static handler: this one adds the cache
+    # headers, the compressed variants and the content-hashed filenames that
+    # make serving them from here defensible. The `brotli` extra is what lets
+    # CompressedManifestStaticFilesStorage emit .br alongside .gz — without it
+    # the compression half of that backend silently does less. See
+    # docs/serving.md.
+    "whitenoise[brotli]>=6.9,<7.0",
 ]
 
 # ---------------------------------------------------------------------------

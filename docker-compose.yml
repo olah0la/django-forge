@@ -258,6 +258,17 @@ services:
     # built — that is what makes it a faithful stand-in for a deployment, and
     # what lets a production-only problem be reproduced locally. Mounting source
     # here would defeat the purpose of having two profiles at all.
+    #
+    # THAT INCLUDES UPLOADS (M6-03). A `media_data` volume here would be one
+    # line and would look like a fix: uploads would survive `docker compose
+    # down` on this machine. It is not offered, because it would make the
+    # problem invisible exactly where it is cheapest to notice — a volume is
+    # one host, and the first deploy onto a second replica or a new node loses
+    # the files anyway. Uploads survive in object storage; see
+    # DJANGO_DEFAULT_FILE_STORAGE in .env.example and docs/serving.md.
+    #
+    # Static files need no volume either: they are baked into the image by
+    # `collectstatic` during the build and served from there.
 
     profiles:
       - prod

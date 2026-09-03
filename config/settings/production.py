@@ -158,8 +158,11 @@ SILENCED_SYSTEM_CHECKS: list[str] = [
 # What you are turning on: /api/v1/docs and /api/v1/openapi.json, a complete
 # machine-readable map of every endpoint, parameter and response shape. For an
 # internal API that is free reconnaissance for anyone who finds it. Decide
-# deliberately, and note that the docs page needs collectstatic to have run
-# (TODO(M6-03)) or it renders without its assets.
+# deliberately.
+#
+# The page renders correctly when it is on: Ninja's bundled Swagger UI assets
+# are collected into the image at build time and served by WhiteNoise (M6-03),
+# so it no longer depends on cdn.jsdelivr.net and no longer renders unstyled.
 API_DOCS_ENABLED = env.bool("DJANGO_API_DOCS_ENABLED", default=False)
 
 # --------------------------------------------------------------------------
@@ -173,6 +176,45 @@ API_DOCS_ENABLED = env.bool("DJANGO_API_DOCS_ENABLED", default=False)
 # and wants it legible. It is not the normal case, and turning it on gives up
 # every query built on the structured fields.
 LOGGING = build_logging(env.str("DJANGO_LOG_FORMAT", default="json"))
+
+# --------------------------------------------------------------------------
+# Static files (M6-03)
+# --------------------------------------------------------------------------
+# ONE KEY of base's STORAGES is replaced; "default" — where uploads go — is
+# inherited unchanged, because it is already environment-readable there.
+#
+# WHAT THIS BACKEND DOES, and why it is worth a settings override:
+#
+#   Content-hashed filenames. `base.css` becomes `base.96c479cedf7a.css`, and
+#   WhiteNoise then serves it with
+#   `Cache-Control: max-age=315360000, public, immutable` — ten years, safely,
+#   because a changed file is a changed NAME. Without hashing, a long cache
+#   lifetime is how a deploy ships new HTML against a browser's cached old
+#   stylesheet.
+#
+#   The long header is tied to the hash, not to this setting: measured on the
+#   running profile, the unhashed `base.css` gets `max-age=60` instead.
+#
+#   Pre-compression. Every text asset is written once at build time as .gz and
+#   .br alongside the original, and WhiteNoise picks by Accept-Encoding. The
+#   alternative is compressing the same unchanging bytes on every request, in
+#   a worker that should be answering requests.
+#
+# WHY IT CANNOT LIVE IN base.py. `Manifest...` reads staticfiles.json, written
+# by `collectstatic`. No manifest, no lookup: every {% static %} call raises
+# ValueError instead of rendering. Development and the test suite have no
+# collected directory and must not have one — so the strict backend belongs to
+# the layer that is served from a built image, and only that one.
+#
+# The consequence, stated plainly: THIS LAYER REQUIRES `collectstatic` TO HAVE
+# RUN. The Dockerfile runs it in the builder stage, which is what makes that
+# true of every image rather than of every deployment that remembered.
+STORAGES = {
+    **STORAGES,
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 
 # PostgreSQL, from DATABASE_URL. See database_from_url() for the connection
 # reuse settings and the worker-count arithmetic that bounds them.

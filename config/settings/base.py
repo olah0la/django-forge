@@ -137,6 +137,24 @@ MIDDLEWARE = [
     # be able to find. See docs/logging.md.
     "apps.core.middleware.RequestIDMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    # Serves everything under STATIC_URL (M6-03). Position is not a style
+    # choice, and it is wrong in both directions:
+    #
+    #   ABOVE SecurityMiddleware — a static request would skip the HTTPS
+    #   redirect and the security headers, so the one kind of response a
+    #   browser caches for ten years would be the one served without them.
+    #
+    #   BELOW anything else — every request for an unchanging file would open
+    #   a session, run CSRF, and hit the database for a user, to return bytes
+    #   that depend on none of it.
+    #
+    # It short-circuits: a static hit returns from here and the middleware
+    # BELOW never runs. The middleware above it still does — so a static
+    # request is correlated and logged like any other (RequestIDMiddleware is
+    # outermost by design), it simply never opens a session or touches the
+    # database. Measured: `GET /static/admin/css/base.css 200` appears in the
+    # request log, which is worth knowing before you go looking for it.
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -389,12 +407,87 @@ USE_I18N = True
 USE_TZ = True
 
 # --------------------------------------------------------------------------
-# Static files
+# Static files (M6-03)
 # --------------------------------------------------------------------------
-# TODO(M6-03): collectstatic runs at image build time and the serving strategy
-# is decided there.
+# STATIC FILES are shipped WITH the code: CSS, JavaScript, the admin's images,
+# the Swagger UI bundle that renders /api/v1/docs. They are part of the build
+# artefact and change only when you deploy.
+#
+# MEDIA FILES are user uploads. They arrive at run time, from people, and this
+# template does not store them anywhere durable — see the MEDIA block below,
+# which is the more important half of this section.
+#
+# Confusing the two is the mistake this section exists to prevent, and it is an
+# easy one to make: Django names them almost identically, and in development
+# both are just files on disk.
 STATIC_URL = "static/"
+
+# Where `collectstatic` writes, and where WhiteNoise reads. Populated during
+# the IMAGE BUILD (Dockerfile, builder stage) and never at container start: the
+# image is then self-contained, and its contents depend on what it is rather
+# than on when it happened to boot.
+#
+# Git-ignored, and absent from a fresh checkout — development never needs it,
+# because WhiteNoise resolves through the staticfiles finders there instead
+# (WHITENOISE_USE_FINDERS in development.py).
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# --------------------------------------------------------------------------
+# Media files — user uploads (M6-03)
+# --------------------------------------------------------------------------
+# ⚠️  THE WARNING THAT MATTERS
+#
+#     A CONTAINER FILESYSTEM IS NOT STORAGE.
+#
+# The default backend below writes to MEDIA_ROOT, inside the container. That
+# works perfectly on a laptop, works perfectly in staging, and destroys every
+# upload the first time a container is replaced — which is every deploy, every
+# scale-in, every node replacement. Nothing raises. The files are simply gone,
+# and the code that lost them still passes its tests.
+#
+# It is the default because it is what makes a clean checkout and the test
+# suite work with no setup, NOT because it is a deployment answer. Any project
+# that accepts an upload needs the substitution below before it ships.
+#
+# See docs/serving.md, "Media files are not static files".
+MEDIA_URL = "media/"
+
+# `mediafiles/`, not `media/`. Django allows either; this one reads as the
+# sibling of `staticfiles/` that it is, and cannot be confused with an
+# application directory named `media/`. Both are git-ignored, anchored to the
+# repository root — see .gitignore.
+MEDIA_ROOT = BASE_DIR / "mediafiles"
+
+STORAGES = {
+    # THE SUBSTITUTION POINT — the entry an adopter is expected to change.
+    #
+    # A dotted path, so moving uploads to object storage is a variable rather
+    # than a patch: install django-storages and set
+    #
+    #     DJANGO_DEFAULT_FILE_STORAGE=storages.backends.s3.S3Storage
+    #
+    # It chooses WHICH backend, not how that backend is configured. A backend's
+    # own options — bucket, region, credentials, signing — are its settings and
+    # belong to the layer that adopts it. Deliberately not modelled here: every
+    # provider names them differently, and a template that guessed would be
+    # wrong for all but one of them.
+    #
+    # An unimportable path fails loudly at the first file access rather than
+    # falling back to local disk, and that is the behaviour to want: a silent
+    # fallback is exactly how uploads end up on an ephemeral filesystem without
+    # anyone having decided to put them there.
+    "default": {
+        "BACKEND": env.str(
+            "DJANGO_DEFAULT_FILE_STORAGE",
+            default="django.core.files.storage.FileSystemStorage",
+        )
+    },
+    # Plain: uncompressed, unhashed, no manifest. Correct for development and
+    # for the test suite, neither of which has a collected `staticfiles/` to
+    # read a manifest from. The production layer replaces THIS KEY ONLY, and
+    # production.py explains why that override cannot live here.
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+}
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 

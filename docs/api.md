@@ -440,7 +440,9 @@ falls back to a template that loads `swagger-ui-bundle.js` from `cdn.jsdelivr.ne
 breaks with no network, and every developer opening it makes a request to a third party.
 
 The consequence to know: in production the docs page needs `collectstatic` to have run, or it
-renders without its assets. `TODO(M6-03)` owns making that part of the image build.
+renders without its assets. That is handled — the image build collects them and WhiteNoise serves
+them (M6-03), so a production docs page renders from the bundled assets and makes no request to
+`cdn.jsdelivr.net`. See [serving.md](serving.md).
 
 ---
 
