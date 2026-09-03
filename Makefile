@@ -143,6 +143,22 @@ test-db: ## [M4] Run the test suite in the container against real PostgreSQL
 	$(COMPOSE) exec -T $(SERVICE) sh -c 'DJANGO_SETTINGS_MODULE=config.settings.test \
 		DJANGO_TEST_DATABASE_URL="$$DATABASE_URL" python -m pytest'
 
+shutdown-demo: ## [M6] Demonstrate graceful shutdown: SIGTERM during a slow request
+	@# The same test `make check` runs, with output shown, because M6-05's
+	@# acceptance criterion is "verified by sending SIGTERM during a
+	@# deliberately slow request" and that is worth being able to WATCH rather
+	@# than take on trust from a green dot.
+	@#
+	@# A wrapper around the test rather than a second script doing the same
+	@# thing by hand: two implementations of a demonstration drift, and the one
+	@# in the Makefile is the one nobody runs in CI, so it drifts first.
+	@#
+	@# It starts a real uvicorn on a free port, holds a request open, signals
+	@# the process mid-request, and asserts the response still arrives complete.
+	@printf '\n  Starting a real server, holding a request open, and sending it SIGTERM.\n'
+	@printf '  The request must come back 200 — see docs/ops.md for the sequence.\n\n'
+	$(UV) run pytest tests/test_shutdown.py -v -k sigterm --log-cli-level=INFO
+
 check: lint typecheck test ## Run lint, typecheck and test (local pre-push gate)
 
 audit: ## Security audit — Django deploy checks + secret scan over full git history
@@ -388,7 +404,7 @@ clean: ## Remove the virtualenv and tool caches (never touches .env or data)
 # Every target is phony: none produces a file of its own name. Without this a
 # directory named `build` would silently make `make build` a no-op.
 .PHONY: help install install-prod lock upgrade audit \
-        lint format typecheck test test-db check \
+        lint format typecheck test test-db shutdown-demo check \
         build up down logs ps shell \
         migrate makemigrations migrations-check seed django-shell superuser \
         db-shell db-dump db-restore \

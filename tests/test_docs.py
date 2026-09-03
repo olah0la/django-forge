@@ -210,3 +210,65 @@ def test_restore_validates_the_dump_before_dropping_anything():
         "db-restore must list the archive before dropping the database, "
         "or a wrong FILE= destroys the database and only then reports the error"
     )
+
+
+# ---------------------------------------------------------------------------
+# M6-05: the shutdown sequence has to stay written down, and stay ordered
+# ---------------------------------------------------------------------------
+# The same class of silently-failing criterion as the two above. The sequence is
+# only useful as an ORDER — "readiness fails, then the socket closes, then
+# requests finish, then connections close" — and a tightening pass that turns
+# the table into prose can drop a step without anything failing. The steps are
+# also the checklist someone reads at 3am while a deploy is dropping requests.
+OPS_DOC = REPO_ROOT / "docs" / "ops.md"
+
+SHUTDOWN_SEQUENCE = [
+    pytest.param([r"SIGTERM"], id="the signal that starts it"),
+    pytest.param([r"readiness", r"503"], id="readiness reports failure"),
+    pytest.param([r"in-flight"], id="in-flight requests complete"),
+    pytest.param([r"database connections"], id="connections closed"),
+    pytest.param([r"exec"], id="no shell between platform and server"),
+    pytest.param([r"grace period|graceful_timeout"], id="the timeout ordering"),
+]
+
+
+@pytest.mark.parametrize("patterns", SHUTDOWN_SEQUENCE)
+def test_the_shutdown_section_names_each_step(patterns):
+    """M6-05 criterion 5. Each step named, not a general "it shuts down cleanly".
+
+    A reader who has not personally lost requests to a deploy does not know
+    which steps exist, so a summary gives them nothing to check their own
+    configuration against.
+    """
+    text = OPS_DOC.read_text()
+    section = text[text.index("## Shutting down without dropping requests") :]
+    section = section[: section.index("\n## What this does not solve")]
+
+    for pattern in patterns:
+        assert re.search(pattern, section, re.IGNORECASE), (
+            f"the shutdown section no longer names {pattern!r}"
+        )
+
+
+def test_the_shutdown_docs_keep_liveness_and_readiness_apart():
+    """The expensive mistake, and the one a tightening pass would cut as obvious.
+
+    Failing liveness during a drain makes the platform KILL a process that was
+    shutting down cleanly — the dropped requests arriving by way of the
+    mechanism meant to prevent them.
+    """
+    text = OPS_DOC.read_text()
+
+    assert re.search(r"[Ll]iveness stays 200|liveness must (keep|not)", text), (
+        "docs/ops.md no longer says liveness stays up during a drain"
+    )
+
+
+def test_makefile_exposes_the_shutdown_demonstration():
+    """M6-05 criterion 2 is verified by demonstration, so the demonstration has
+    to be discoverable — `make help` lists only targets carrying a `##` comment.
+    """
+    makefile = (REPO_ROOT / "Makefile").read_text()
+    assert re.search(r"^shutdown-demo:.*##", makefile, re.MULTILINE), (
+        "make shutdown-demo must exist and carry a ## comment so `make help` lists it"
+    )

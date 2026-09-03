@@ -32,6 +32,8 @@ from django.http import HttpRequest, JsonResponse
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_safe
 
+from apps.core.shutdown import is_shutting_down
+
 logger = logging.getLogger(__name__)
 
 
@@ -104,6 +106,13 @@ def liveness(request: HttpRequest) -> JsonResponse:
     lazy objects and only reach the database when something touches them. A test
     pins that with assertNumQueries(0), because a middleware added later could
     silently break it.
+
+    **It keeps answering 200 while the process is shutting down, deliberately.**
+    A draining process is still healthy — it is finishing its work and leaving.
+    Failing liveness during the drain tells the platform to KILL it, which is
+    precisely the dropped-request outcome M6-05 exists to prevent, arriving by
+    way of the mechanism meant to prevent it. Readiness is what changes during a
+    drain; liveness is not. See readiness() below and docs/ops.md.
     """
     return JsonResponse({"status": "alive"})
 
@@ -113,9 +122,15 @@ def liveness(request: HttpRequest) -> JsonResponse:
 def readiness(request: HttpRequest) -> JsonResponse:
     """Should this process receive traffic right now?
 
-    Runs every check in READINESS_CHECKS and returns 503 if any fails, so the
-    platform stops routing to a replica that cannot serve. It does NOT mean the
+    Two things make it 503. First, shutdown has begun (M6-05): the process is
+    draining and must be taken out of rotation before it stops accepting
+    connections, or the platform keeps routing new requests into something that
+    is leaving. Second, a check in READINESS_CHECKS failed. Neither means the
     process should be restarted — see liveness() above.
+
+    The same body for both is intentional. A load balancer's only question is
+    "send traffic here?", and "no" is the whole answer; splitting it into two
+    negative answers invites a caller to treat one of them as retryable.
 
     **The body carries no detail, deliberately.** Which check failed, and the
     exception behind it, are logged; the response says `{"status": "not ready"}`
@@ -127,6 +142,18 @@ def readiness(request: HttpRequest) -> JsonResponse:
     503 rather than 500: this is a temporary inability to serve, which is what
     503 means, and load balancers treat it as such.
     """
+    # BEFORE the dependency checks, and not as one of them. READINESS_CHECKS is
+    # reserved for hard dependencies — "is something this service needs down?" —
+    # and draining is not that: every dependency can be perfectly healthy while
+    # this particular process is on its way out.
+    #
+    # Order matters for a second reason. Once shutdown has begun the answer is
+    # settled, so there is no value in spending a database round trip to confirm
+    # it, on every probe, for the length of the drain.
+    if is_shutting_down():
+        logger.info("readiness: draining, this process is shutting down")
+        return JsonResponse({"status": "not ready"}, status=503)
+
     failed = [name for name, check in READINESS_CHECKS if not check()]
 
     if failed:

@@ -167,6 +167,15 @@ services:
     #
     # `--reload` is a development feature and must never ship. app-prod runs
     # the image's own CMD, which is gunicorn — see that service below.
+
+    # Drain here too, so the graceful path is exercised daily rather than first
+    # discovered during a production deploy (M6-05). Without this the service
+    # inherits Docker's default of 10s, which is shorter than the 25s uvicorn is
+    # told to spend draining below — so a slow request would be SIGKILLed here
+    # and survive in production, which is the wrong way round for a bug to be
+    # found. Matches app-prod; the reasoning is in that service's block.
+    stop_grace_period: 30s
+
     command:
       - uvicorn
       - config.asgi:application
@@ -174,6 +183,14 @@ services:
       - 0.0.0.0
       - --port
       - "8000"
+      # The same 25s gunicorn gives its workers in production
+      # (GUNICORN_GRACEFUL_TIMEOUT, config/gunicorn.py), and for the same
+      # reason: it must expire BEFORE stop_grace_period above, or Compose
+      # SIGKILLs mid-drain and the graceful path never finishes. Uvicorn's
+      # default is to wait forever, which under a platform grace period means
+      # "wait until killed".
+      - --timeout-graceful-shutdown
+      - "${UVICORN_GRACEFUL_TIMEOUT:-25}"
       # Reload on source changes, using watchfiles across the bind mount from
       # M2-07. /app holds only project files — the virtualenv lives at
       # /opt/venv — so the watcher has little to scan.

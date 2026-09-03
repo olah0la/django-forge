@@ -289,6 +289,21 @@ does not. Neither is authenticated, neither discloses why it failed, and both ar
 request log. [docs/ops.md](docs/ops.md) covers the distinction, how to wire it to Kubernetes, and
 the two production settings that silently break probes if you do not know about them.
 
+**A container being stopped finishes what it was doing first** (M6-05). On `SIGTERM` readiness
+starts answering 503, the server stops accepting new connections, in-flight requests run to
+completion, and database connections are closed before the process exits:
+
+```bash
+make shutdown-demo   # holds a request open, sends SIGTERM mid-request, asserts it still returns 200
+```
+
+Containers are stopped on *every* deploy, so an application that ignores `SIGTERM` drops requests on
+every release — errors that correlate with deploys and are almost impossible to attribute afterwards,
+because the process that would have logged them was killed. The graceful timeout is deliberately 25s
+against the platform's 30s: equal values race, and the platform wins.
+[docs/ops.md](docs/ops.md#shutting-down-without-dropping-requests) has the ordered sequence, why
+liveness must keep returning 200 throughout, and the one gap the application cannot close on its own.
+
 Development is the default profile, so a bare `docker compose up` starts it with no flag. The
 production-like profile is opt-in and must name its service:
 `docker compose --profile prod up app-prod`. Both run the same image; the second runs it the way a

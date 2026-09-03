@@ -118,6 +118,8 @@ readinessProbe:
   httpGet: { path: /readyz, port: 8000 }
   periodSeconds: 5
   timeoutSeconds: 3
+
+terminationGracePeriodSeconds: 30   # must exceed GUNICORN_GRACEFUL_TIMEOUT (25)
 ```
 
 > ⚠️ **Do not point `livenessProbe` at `/readyz`.** It is the single most common way this gets
@@ -206,6 +208,113 @@ message alone is what is actionable.
 
 ---
 
+## Shutting down without dropping requests
+
+A container is stopped on every deploy, every scale event and every node replacement. The platform
+sends `SIGTERM`, waits a grace period, then `SIGKILL`s. An application that ignores `SIGTERM` loses
+every request it was serving, on every release — errors that correlate with deploys and are hard to
+attribute, because the process that would have logged them was killed.
+
+The sequence, in the order it happens:
+
+| # | What happens | Who does it |
+| --- | --- | --- |
+| 1 | `SIGTERM` arrives at the server, as PID 1 | the platform |
+| 2 | readiness starts answering **503** | `apps/core/shutdown.py` |
+| 3 | the listening socket closes — no new connections | uvicorn / the gunicorn arbiter |
+| 4 | in-flight requests run to completion | uvicorn, bounded by `graceful_timeout` |
+| 5 | database connections are closed | `apps/core/shutdown.py`, on ASGI lifespan shutdown |
+| 6 | the process exits, inside the platform's grace period | uvicorn / gunicorn |
+
+Steps 1, 3, 4 and 6 are the servers doing their job. Steps 2 and 5 are this project's, and both are
+in `apps/core/shutdown.py`.
+
+**Nothing may sit between the platform and the server.** `docker-entrypoint.sh` ends with
+`exec "$@"`, which *replaces* the shell rather than spawning under it, so the server is PID 1 and
+receives the signal directly. The `Dockerfile`'s `ENTRYPOINT` and `CMD` are both exec form for the
+same reason — shell form would reintroduce an `sh -c` one line later. Without that, the shell holds
+the signal, the platform waits out the entire grace period, and then `SIGKILL`s: every in-flight
+request lost, having taken the full 30 seconds to lose them.
+
+### The timeouts have to be ordered, not just set
+
+```
+   uvicorn --timeout-graceful-shutdown  25s  ── development
+   GUNICORN_GRACEFUL_TIMEOUT            25s  ── production
+                                         <
+   stop_grace_period / terminationGracePeriodSeconds   30s
+```
+
+The gap is the point. If the graceful timeout is equal to or larger than the platform's grace
+period, the platform `SIGKILL`s while the drain is still running — the drain is configured, looks
+configured, and never completes. Raise one and you raise the other, keeping the headroom.
+
+Uvicorn's own default is to wait **forever** for in-flight requests, which under a platform grace
+period means "wait until killed". Both profiles therefore set it explicitly, and to the same number,
+so a shutdown bug shows up on a laptop rather than on a deploy.
+
+### Liveness stays 200 the whole time, deliberately
+
+A draining process is *healthy*. It is finishing its work and leaving.
+
+Failing liveness during a drain tells the platform to **kill** it, which produces exactly the
+dropped requests this whole mechanism exists to prevent — arriving by way of the mechanism meant to
+prevent them. Readiness is what changes during a shutdown. Liveness is not.
+
+> ⚠️ Under Docker the container will show `unhealthy` while draining, because the image's
+> `HEALTHCHECK` requests `/readyz`. That is correct and harmless: Docker never restarts a container
+> for being unhealthy, and the container is about to exit anyway.
+
+### What the readiness flip actually buys, and what it does not
+
+Step 2 happens the instant the signal lands, and step 3 happens almost as quickly — uvicorn closes
+the listening socket at the top of its own shutdown. So an external probe opening a **new**
+connection during the drain will usually see the connection refused rather than a 503.
+
+Both answers mean "not taking new traffic", which is what matters. But it is worth being precise
+about which mechanism is doing the work:
+
+- **The closed socket** is what stops new connections. It needs no help.
+- **The 503** is what protects requests arriving on connections that are *already open* — keep-alive
+  connections a load balancer is holding — and is what a health-check-driven balancer polls to
+  decide to deregister.
+
+What neither closes is the window between the platform deciding to stop the container and its load
+balancer noticing. Endpoint removal is asynchronous almost everywhere, so a request can be
+dispatched to a process that has already been signalled. The in-process answer to that window does not exist;
+the platform-side one is a pre-stop delay that keeps the process serving while the balancer catches
+up. On Kubernetes that is a `preStop` hook, and its sleep has to fit inside
+`terminationGracePeriodSeconds` alongside the drain.
+
+### Verifying it
+
+```bash
+make shutdown-demo
+```
+
+Starts a real server, holds a request open, sends it `SIGTERM` mid-request, and asserts the response
+still arrives complete. It is the same test `make check` runs — a demonstration that is also a
+regression test, rather than a second script that drifts from one.
+
+Against the production-like stack, which is where gunicorn's arbiter is actually involved:
+
+```bash
+make up-prod
+curl "localhost:8001/api/v1/ping"                        # serving
+docker compose --profile prod stop app-prod              # watch `make logs`
+```
+
+The log carries the drain: `shutdown: SIGTERM received, draining`, then uvicorn's `Shutting down`,
+then `shutdown: database connections closed`. The container must exit well inside 30s — if Compose
+reports it after the full grace period, something is holding the signal.
+
+**One thing deliberately left alone.** `docker-entrypoint.sh` installs no `trap` around its
+database-wait loop. During that wait the shell *is* PID 1, and bash's default disposition ends it
+between commands, so a container stopped mid-startup already exits within one connect attempt. A
+trap would add a failure path to the one part of startup that has no requests to protect.
+
+---
+
 ## What this does not solve
 
 **A hung dependency, as opposed to a refused one.** A database that accepts the connection and never
@@ -228,7 +337,6 @@ Each arrives with its issue, and this file is where it gets written down:
 - **M6-02** — the production application server, its worker and timeout defaults, and the reasoning
 - **M6-03** — the static and media file strategy
 - **M6-04** — structured logging and request correlation identifiers
-- **M6-05** — graceful shutdown and the `SIGTERM` sequence
 
 ---
 

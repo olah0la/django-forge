@@ -20,6 +20,7 @@ M7-04 owns the removable worked example.
 tests/testapp/urls.py mounts them on an instance of their own.
 """
 
+import asyncio
 import logging
 
 from django.contrib.auth.models import User
@@ -152,3 +153,35 @@ def boom(request: HttpRequest, payload: SecretIn) -> None:
     """
     logger.info("about to fail for %s", payload.username)
     raise RuntimeError("deliberate failure for the logging test")
+
+
+# ---------------------------------------------------------------------------
+# Graceful shutdown (M6-05)
+# ---------------------------------------------------------------------------
+# M6-05's acceptance criterion 2 is "in-flight requests complete before process
+# exit, verified by sending SIGTERM during a deliberately slow request", so the
+# verification needs a request that is reliably still in flight when the signal
+# lands. Nothing shipped is slow on purpose, and nothing shipped should be.
+#
+# Here rather than in `apps/`, for the same reason as everything else in this
+# module: an endpoint whose entire purpose is to hang is not one a derived
+# project should inherit, and one reachable in production is a
+# denial-of-service primitive handed to anyone who finds it.
+#
+# `async def`, deliberately. A sync view runs in Django's threadpool via
+# sync_to_async, so the test would be measuring threadpool teardown as much as
+# the server's connection draining. An awaited sleep holds the connection open
+# and nothing else, which is exactly the condition the criterion describes.
+shutdown_router = Router(tags=["shutdown"])
+
+
+@shutdown_router.get("/slow", summary="Hold a request open for a while")
+async def slow(request: HttpRequest, seconds: float = 1.0) -> dict[str, float]:
+    """Stay in flight for `seconds`, then answer normally.
+
+    The response echoes the duration it was asked for, so a completed slow
+    request is distinguishable from a connection that was closed early and
+    happened to return something.
+    """
+    await asyncio.sleep(seconds)
+    return {"slept": seconds}

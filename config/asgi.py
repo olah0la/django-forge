@@ -22,7 +22,10 @@ from config import require_settings_module
 
 require_settings_module()
 
-application = get_asgi_application()
+# The Django half of the stack. Named separately from `application` because
+# the two have different types once the wrappers below are applied, and
+# reassigning one name through them is what mypy objects to.
+django_application = get_asgi_application()
 
 # --------------------------------------------------------------------------
 # Static files in development
@@ -40,4 +43,24 @@ from django.conf import settings  # noqa: E402
 if settings.DEBUG:
     from django.contrib.staticfiles.handlers import ASGIStaticFilesHandler  # noqa: E402
 
-    application = ASGIStaticFilesHandler(application)
+    django_application = ASGIStaticFilesHandler(django_application)
+
+# --------------------------------------------------------------------------
+# Graceful shutdown (M6-05)
+# --------------------------------------------------------------------------
+# OUTERMOST, and that is the whole reason it is applied last. Django's handler
+# serves `http` and rejects every other scope type, so without a wrapper uvicorn
+# finds lifespan unsupported and disables it — the process then has no startup
+# or shutdown hook at all.
+#
+# This wrapper answers the lifespan protocol itself and passes every other scope
+# straight through, so request handling is untouched. What it buys: readiness
+# starts reporting 503 the moment SIGTERM lands, and database connections are
+# closed once the last in-flight request has finished.
+#
+# Applied in BOTH profiles on purpose. A drain that only exists in production is
+# a drain nobody exercises until a deploy goes wrong. See apps/core/shutdown.py
+# and docs/ops.md.
+from apps.core.shutdown import ShutdownLifespanMiddleware  # noqa: E402
+
+application = ShutdownLifespanMiddleware(django_application)

@@ -637,6 +637,30 @@ def test_mail_admins_is_not_inherited_from_djangos_defaults(load_settings):
     assert json.loads(out) == []
 
 
+def test_the_built_config_carries_the_health_check_filter(load_settings):
+    """The regression this test exists for actually shipped.
+
+    M6-01 put its probe suppression in a literal `LOGGING` dict in base.py.
+    M6-04 then had every layer assign `LOGGING = build_logging(...)`, which
+    overrides that dict — so M6-01's filter became dead code and the probes came
+    back, in a merge where neither side's tests failed on its own branch.
+
+    Asserted against the layer's FINAL settings, not against base.py, because
+    that override is precisely the step that broke it.
+    """
+    code, out, err = load_settings(
+        "production",
+        PRODUCTION_ENV,
+        "settings.LOGGING['loggers'].get('django.request', {}).get('filters', [])",
+    )
+
+    assert code == 0, err
+    assert "suppress_health_checks" in json.loads(out), (
+        "django.request logs every 4xx and 5xx, so without this filter a database "
+        "outage makes every readiness probe emit an ERROR line from every replica"
+    )
+
+
 def test_the_correlation_middleware_runs_first(load_settings):
     """Middleware wraps in list order, so the first entry is the outermost. Any
     later position leaves the middleware above it uncorrelated.
@@ -647,14 +671,27 @@ def test_the_correlation_middleware_runs_first(load_settings):
     assert json.loads(out) == "apps.core.middleware.RequestIDMiddleware"
 
 
-def test_the_excluded_paths_list_ships_empty(load_settings):
-    """TODO(M6-01) owns filling this in. A guess here would either conflict
-    with the paths that issue chooses or agree with them by accident, which
-    looks verified and is not.
+def test_the_excluded_paths_list_holds_the_probe_paths(load_settings):
+    """M6-01 has landed, so the list this file once required to be EMPTY is filled.
+
+    It is the only thing keeping probe lines out of the request log:
+    `uvicorn.access` is silenced outright, so RequestIDMiddleware's line is the
+    sole one per request. Empty here means one line per probe, per replica,
+    every few seconds, forever.
+
+    Asserted against HEALTH_CHECK_PATHS rather than a literal, because the point
+    is that the two cannot drift — a hard-coded pair here would keep passing
+    after the URLconf moved.
     """
     code, out, err = load_settings(
-        "production", PRODUCTION_ENV, "settings.REQUEST_LOG_EXCLUDED_PATHS"
+        "production",
+        PRODUCTION_ENV,
+        "[settings.REQUEST_LOG_EXCLUDED_PATHS, list(settings.HEALTH_CHECK_PATHS)]",
     )
 
     assert code == 0, err
-    assert json.loads(out) == []
+    excluded, health_paths = json.loads(out)
+    assert excluded == health_paths, (
+        "the request log must exclude exactly the probe paths, derived from "
+        "HEALTH_CHECK_PATHS rather than repeated"
+    )

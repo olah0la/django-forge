@@ -198,6 +198,22 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
 # ---------------------------------------------------------------------------
+# Stop signal (M6-05)
+# ---------------------------------------------------------------------------
+# SIGTERM is already Docker's default, so this line changes no behaviour. It is
+# here because it is the ONE end of the shutdown contract that is otherwise
+# invisible: everything else about the drain — `exec` in the entrypoint, exec
+# form below, `graceful_timeout` in config/gunicorn.py, `stop_grace_period` in
+# docker-compose.yml — is written down somewhere a reader can find it, and the
+# signal that starts the whole sequence was the one thing left implicit.
+#
+# It also fails loudly rather than quietly if someone changes it. Gunicorn
+# treats SIGTERM as "graceful stop" and SIGQUIT as "stop NOW, drop what you are
+# holding"; a STOPSIGNAL of SIGQUIT would look like a tidy-up and would silently
+# turn every deploy back into dropped requests. See docs/ops.md.
+STOPSIGNAL SIGTERM
+
+# ---------------------------------------------------------------------------
 # The production server (M6-02)
 # ---------------------------------------------------------------------------
 # Gunicorn supervising Uvicorn workers. Gunicorn forks and restarts processes;

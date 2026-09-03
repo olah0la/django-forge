@@ -62,6 +62,21 @@ PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 # each layer in a subprocess — neither needs this layer to be JSON.
 LOGGING = build_logging("console")  # noqa: F405
 
+# A URLconf override for tests that run a REAL SERVER in a subprocess (M6-05).
+#
+# `override_settings(ROOT_URLCONF=...)` is how every other test reaches
+# tests/testapp/urls.py, and it cannot work here: it patches settings in THIS
+# process, and the server under test is a different one. The subprocess reads
+# its configuration from the environment or from nothing at all.
+#
+# A dedicated variable rather than a general one, for the same reason
+# DJANGO_TEST_DATABASE_URL above is dedicated: it is set by the test that needs
+# it and by nothing else, so a stray value in a developer's `.env` cannot
+# repoint the application's URLs. It exists only in the test layer, so no
+# deployment can read it even if it were set.
+if env.str("DJANGO_TEST_ROOT_URLCONF", default="").strip():  # noqa: F405
+    ROOT_URLCONF = env.str("DJANGO_TEST_ROOT_URLCONF")  # noqa: F405
+
 EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
 
 # Enabled so the seed command's own tests can call it. The guard itself is

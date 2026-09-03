@@ -298,20 +298,27 @@ def test_the_filter_fails_open_on_an_unrecognised_record(args):
     assert SuppressHealthCheckAccessLogs().filter(record) is True
 
 
-def test_the_logging_config_keeps_a_handler_on_the_access_logger():
-    """dictConfig CLEARS a named logger's handlers.
+def test_the_probes_are_excluded_from_the_request_log():
+    """M6-01's criterion, discharged the way M6-04 left the logging stack.
 
-    An entry declaring only `filters` would therefore pass criterion 5 by
-    deleting access logging entirely, which is not what it asks for. This is the
-    line that makes the difference, and it looks redundant.
+    M6-01 kept a handler on `uvicorn.access` and filtered the probes out of it,
+    because deleting access logging would have passed the criterion by removing
+    the log. M6-04 then silenced `uvicorn.access` outright and replaced it with
+    RequestIDMiddleware's single correlated line per request — so the log is
+    replaced rather than deleted, and the exclusion has to move with it.
+
+    REQUEST_LOG_EXCLUDED_PATHS is now what discharges the criterion. Empty, the
+    probes reappear in the log they were removed from, which is exactly the
+    regression that shipped when these two issues were merged.
     """
+    assert list(settings.REQUEST_LOG_EXCLUDED_PATHS) == list(settings.HEALTH_CHECK_PATHS), (
+        "the request log must exclude the probe paths, or every probe logs a line"
+    )
+
     access = settings.LOGGING["loggers"]["uvicorn.access"]
-    assert access["handlers"], "uvicorn.access must keep a handler"
+    assert access["handlers"] == [], "uvicorn.access is silenced in favour of the request log"
     assert access["propagate"] is False, "otherwise every access line is logged twice"
     assert settings.LOGGING["disable_existing_loggers"] is False
-
-    handler = settings.LOGGING["handlers"][access["handlers"][0]]
-    assert "suppress_health_checks" in handler["filters"]
 
 
 def test_the_logging_config_leaves_django_request_its_inherited_handlers():

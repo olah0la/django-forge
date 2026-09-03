@@ -222,6 +222,17 @@ graceful timeout never gets to do its job. Thirty seconds is precisely the commo
 
 Equal values race. Raise this only together with the platform's grace period, keeping the gap.
 
+This is one number in a sequence, and the sequence is what makes a deploy lossless: the arbiter
+forwards `SIGTERM`, readiness starts answering 503, each worker finishes what it is holding, and
+database connections are closed on the way out.
+**[ops.md](ops.md#shutting-down-without-dropping-requests) walks the whole thing through**,
+including the one gap the application cannot close on its own, and `make shutdown-demo`, which
+proves the round trip against a real server.
+
+`worker_exit` in `config/gunicorn.py` is part of it: a backstop that closes database connections for
+a worker that exits *without* a clean lifespan shutdown — one killed for exceeding `timeout`, or
+after a second signal — which would otherwise leave connections behind a process that is gone.
+
 ---
 
 ## Logging
@@ -272,4 +283,3 @@ make logs | grep -c "Booting worker"   # 3
 | **M6-01** | The liveness and readiness endpoints, and the container `HEALTHCHECK` that calls readiness instead of `import django` |
 | **M6-03** | Static and media files — `collectstatic` at build time, and why a container filesystem is the wrong place for uploads |
 | **M6-04** | Access lines and application logs as JSON through one configuration, with a correlation identifier. Request duration and that identifier have to come from Django middleware, not a server format string — see the logging section above |
-| **M6-05** | The shutdown sequence end to end: `SIGTERM` to the arbiter, readiness failing immediately, in-flight requests draining inside `graceful_timeout`, connections closed cleanly |

@@ -318,3 +318,43 @@ errorlog = "-"
 # then runs when settings are first read and can claim them, because it does
 # not disable existing loggers. Defining a competing config here would be the
 # first thing M6-04 has to remove.
+
+# --------------------------------------------------------------------------
+# Server hooks — graceful shutdown (M6-05)
+# --------------------------------------------------------------------------
+# What gunicorn already does on SIGTERM, and does not need help with: the
+# arbiter stops accepting, forwards SIGTERM to every worker, and gives each one
+# `graceful_timeout` above to finish what is in flight before killing it.
+#
+# The application-side half of the drain — readiness flipping to 503, then
+# database connections closing — rides on the ASGI lifespan protocol instead,
+# because it must work identically under the bare uvicorn the development
+# profile runs. See apps/core/shutdown.py.
+
+
+def worker_exit(server, worker):
+    """Close this worker's database connections as it leaves.
+
+    A BACKSTOP, not the main path. The lifespan shutdown in
+    apps/core/shutdown.py normally does this, and normally runs first; this
+    covers the cases where it does not — a worker killed for exceeding
+    `timeout`, or a uvicorn `force_exit` after a second signal, both of which
+    skip lifespan entirely and would otherwise leave connections open behind a
+    process that is gone.
+
+    Closing twice is harmless: `connections.close_all()` is idempotent.
+
+    Imported inside the function on purpose. This module is read by gunicorn
+    BEFORE the application is loaded — importing Django at the top would run
+    settings during configuration parsing, which is exactly the ordering the
+    module docstring warns against.
+    """
+    try:
+        from apps.core.shutdown import close_database_connections
+
+        close_database_connections()
+    except Exception:
+        # Never raise out of a hook. This runs while the worker is already on
+        # its way out, and an exception here replaces a clean exit with a
+        # traceback that says nothing useful about why the process stopped.
+        server.log.exception("worker_exit: closing database connections failed")
